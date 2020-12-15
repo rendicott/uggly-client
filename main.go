@@ -3,6 +3,9 @@ package main
 import (
 	"flag"
 	"log"
+    "context"
+	"time"
+	"io"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -38,6 +41,26 @@ func main() {
 		log.Fatalf("fail to dial: %v", err)
 	}
 	defer conn.Close()
-	_ = pb.NewScreenerClient(conn)
-    fmt.Println("ScreenerClient created")
+	client := pb.NewScreenerClient(conn)
+    log.Println("ScreenerClient created")
+    ss := pb.ScreenSet{
+        Id: 1,
+        Name: "one",
+    }
+    ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+    stream, err := client.GetScreens(ctx, &ss)
+    if err != nil {
+        panic(err)
+    }
+	for {
+		screen, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Fatalf("%v.GetScreens(_) = _, %v", client, err)
+		}
+		log.Printf("Screen: id: %d, contents('%s'", screen.GetId(),
+			screen.GetContents())
+	}
 }
