@@ -39,4 +39,5 @@ func main() {
 	}
 	defer conn.Close()
 	_ = pb.NewScreenerClient(conn)
+    fmt.Println("ScreenerClient created")
 }
