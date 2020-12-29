@@ -1,15 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"os"
-	"time"
-    "context"
-    "github.com/rendicott/uggly-client/boxes"
 	"github.com/gdamore/tcell/v2"
 	"github.com/inconshreveable/log15"
-    pb "github.com/rendicott/uggly"
-    "google.golang.org/grpc"
+	pb "github.com/rendicott/uggly"
+	"github.com/rendicott/uggly-client/boxes"
+	"google.golang.org/grpc"
+	"os"
+	"time"
 )
 
 // loggo is the global logger
@@ -47,7 +47,7 @@ var (
 	daemonFlag = true
 	logFile    = "ttt.log.json"
 	logLevel   = "info"
-    serverAddr = "localhost:10000"
+	serverAddr = "localhost:10000"
 )
 
 func handle(err error) {
@@ -60,7 +60,6 @@ func handle(err error) {
 func sleep() {
 	time.Sleep(10 * time.Millisecond)
 }
-
 
 func makeboxes(s tcell.Screen, bis []*boxes.DivBox, quit chan struct{}) {
 	for _, bi := range bis {
@@ -83,43 +82,43 @@ func makeboxes(s tcell.Screen, bis []*boxes.DivBox, quit chan struct{}) {
 
 func main() {
 	setLogger(daemonFlag, logFile, logLevel)
-    // set up rpc client
-    var opts []grpc.DialOption
-    opts = append(opts, grpc.WithInsecure())
-    opts = append(opts, grpc.WithBlock())
-    conn, err := grpc.Dial(serverAddr, opts...)
-        if err != nil {
-            loggo.Error("fail to dial","error", err.Error())
-            os.Exit(1)
-        }
-    defer conn.Close()
-    client := pb.NewFeedClient(conn)
-    loggo.Info("New feed client created")
-    fr := pb.FeedRequest{
-        SendData: true,
-    }
-    ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
-    // get feed from server
-    divs, err := client.GetDivs(ctx, &fr)
-    if err != nil {
-        loggo.Error("error getting divs from server", "error", err.Error())
-        os.Exit(1)
-    }
-    // now convert server divs to boxes
+	// set up rpc client
+	var opts []grpc.DialOption
+	opts = append(opts, grpc.WithInsecure())
+	opts = append(opts, grpc.WithBlock())
+	conn, err := grpc.Dial(serverAddr, opts...)
+	if err != nil {
+		loggo.Error("fail to dial", "error", err.Error())
+		os.Exit(1)
+	}
+	defer conn.Close()
+	client := pb.NewFeedClient(conn)
+	loggo.Info("New feed client created")
+	fr := pb.FeedRequest{
+		SendData: true,
+	}
+	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	// get feed from server
+	divs, err := client.GetDivs(ctx, &fr)
+	if err != nil {
+		loggo.Error("error getting divs from server", "error", err.Error())
+		os.Exit(1)
+	}
+	// now convert server divs to boxes
 	var myBoxes []*boxes.DivBox
-    for _, div := range(divs.Boxes) {
-        b := boxes.DivBox{
-            Border: div.Border,
-            BorderW: int(div.BorderW),
-            BorderChar: rune(div.BorderChar),
-            FillChar: rune(div.FillChar),
-            StartX: int(div.StartX),
-            StartY: int(div.StartY),
-            Width: int(div.Width),
-            Height: int(div.Height),
-        }
-        myBoxes = append(myBoxes, &b)
-    }
+	for _, div := range divs.Boxes {
+		b := boxes.DivBox{
+			Border:     div.Border,
+			BorderW:    int(div.BorderW),
+			BorderChar: rune(div.BorderChar),
+			FillChar:   rune(div.FillChar),
+			StartX:     int(div.StartX),
+			StartY:     int(div.StartY),
+			Width:      int(div.Width),
+			Height:     int(div.Height),
+		}
+		myBoxes = append(myBoxes, &b)
+	}
 	tcell.SetEncodingFallback(tcell.EncodingFallbackASCII)
 	s, err := tcell.NewScreen()
 	handle(err)
@@ -129,7 +128,7 @@ func main() {
 		Foreground(tcell.ColorWhite).
 		Background(tcell.Color220))
 	s.Clear()
-    boxes.Loggo = loggo
+	boxes.Loggo = loggo
 	quit := make(chan struct{})
 	go func() {
 		for {
