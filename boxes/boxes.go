@@ -14,7 +14,7 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
     var charMap map[int][]rune
     if tb.Wrap {
         hardBreaks := false
-        charMap = wrap(tb.Content, fillWidth-1, hardBreaks)
+        charMap = wrap(tb.Content, fillWidth, hardBreaks)
     }
     for i, _ := range charMap {
         Loggo.Debug("charmap row info",
@@ -33,7 +33,7 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
             Loggo.Debug("setting bi.RawContents",
                 "row", i, "col", j,
             )
-			bi.RawContents[j][i] = &p
+			bi.RawContents[bi.fillX1+j][bi.fillY1+i] = &p
         }
     }
 }
