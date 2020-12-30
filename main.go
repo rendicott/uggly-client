@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"github.com/gdamore/tcell/v2"
 	"github.com/inconshreveable/log15"
 	pb "github.com/rendicott/uggly"
@@ -19,12 +18,17 @@ var loggo log15.Logger
 // in the gossamer runtime.
 func setLogger(daemonFlag bool, logFileS, loglevel string) {
 	loggo = log15.New()
-	if daemonFlag {
+	if daemonFlag && loglevel == "debug" {
+		loggo.SetHandler(
+			log15.LvlFilterHandler(
+				log15.LvlDebug,
+				log15.Must.FileHandler(logFileS, log15.JsonFormat())))
+    } else if daemonFlag && loglevel == "info" {
 		loggo.SetHandler(
 			log15.LvlFilterHandler(
 				log15.LvlInfo,
 				log15.Must.FileHandler(logFileS, log15.JsonFormat())))
-	} else if loglevel == "debug" {
+	} else if loglevel == "debug" && !daemonFlag {
 		// log to stdout and file
 		loggo.SetHandler(log15.MultiHandler(
 			log15.StreamHandler(os.Stdout, log15.LogfmtFormat()),
@@ -46,13 +50,13 @@ func setLogger(daemonFlag bool, logFileS, loglevel string) {
 var (
 	daemonFlag = true
 	logFile    = "ttt.log.json"
-	logLevel   = "info"
+	logLevel   = "debug"
 	serverAddr = "localhost:10000"
 )
 
 func handle(err error) {
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
+        loggo.Error("generic error", "error", err.Error())
 		os.Exit(1)
 	}
 }
@@ -99,15 +103,16 @@ func main() {
 	}
 	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
 	// get feed from server
-	divs, err := client.GetDivs(ctx, &fr)
+	feed, err := client.GetFeed(ctx, &fr)
 	if err != nil {
 		loggo.Error("error getting divs from server", "error", err.Error())
 		os.Exit(1)
 	}
 	// now convert server divs to boxes
 	var myBoxes []*boxes.DivBox
-	for _, div := range divs.Boxes {
+	for _, div := range feed.DivBoxes.Boxes {
 		b := boxes.DivBox{
+            Name:       div.Name,
 			Border:     div.Border,
 			BorderW:    int(div.BorderW),
 			BorderChar: rune(div.BorderChar),
@@ -119,6 +124,16 @@ func main() {
 		}
 		myBoxes = append(myBoxes, &b)
 	}
+    // collect elements from feed
+    for _, ele := range feed.Elements.TextBlobs {
+        tb := boxes.TextBlob{
+            Content: ele.Content,
+            Wrap: ele.Wrap,
+            DivNames: ele.DivNames,
+        }
+        // mate textBlobs to boxes
+        tb.MateBoxes(myBoxes)
+    }
 	tcell.SetEncodingFallback(tcell.EncodingFallbackASCII)
 	s, err := tcell.NewScreen()
 	handle(err)
