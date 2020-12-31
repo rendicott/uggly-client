@@ -21,24 +21,26 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 		Loggo.Debug("charmap row info",
 			"row", i,
 			"len", len(charMap[i]),
-            "function", "addTextBlob",
-        )
+			"function", "addTextBlob",
+		)
 	}
-	Loggo.Debug("rawContents info", 
-        "rows", len(bi.RawContents[0]),
+	Loggo.Debug("rawContents info",
+		"rows", len(bi.RawContents[0]),
 		"cols", len(bi.RawContents),
-        "function", "addTextBlob",
-    )
-    // log some info about colors
-    fg, _, _ := tb.Style.Decompose()
-    Loggo.Debug("have style color",
-        "stylefgcolor", fg.TrueColor(),
-        "function", "addTextBlob",
-    )
-    debugSampleRate := 10
-    pixelCount := 0
-    var logPixel bool
-    if pixelCount % debugSampleRate == 0 { logPixel = true }
+		"function", "addTextBlob",
+	)
+	// log some info about colors
+	fg, _, _ := tb.Style.Decompose()
+	Loggo.Debug("have style color",
+		"stylefgcolor", fg.TrueColor(),
+		"function", "addTextBlob",
+	)
+	debugSampleRate := 10
+	pixelCount := 0
+	var logPixel bool
+	if pixelCount%debugSampleRate == 0 {
+		logPixel = true
+	}
 	// now fill to max height
 	for i := 0; i < fillHeight; i++ {
 		for j, char := range charMap[i] {
@@ -47,13 +49,13 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 				St:       *tb.Style,
 				IsBorder: false,
 			}
-            if logPixel {
-                Loggo.Debug("setting bi.RawContents",
-                    "row", i, "col", j,
-                    "pixelCount", pixelCount,
-                    "function","addTextBlob",
-                )
-            }
+			if logPixel {
+				Loggo.Debug("setting bi.RawContents",
+					"row", i, "col", j,
+					"pixelCount", pixelCount,
+					"function", "addTextBlob",
+				)
+			}
 			bi.RawContents[bi.fillX1+j][bi.fillY1+i] = &p
 		}
 	}
@@ -129,7 +131,7 @@ type DivBox struct {
 	BorderW     int
 	BorderChar  rune
 	BorderSt    *tcell.Style
-    FillSt      *tcell.Style
+	FillSt      *tcell.Style
 	FillChar    rune
 	StartX      int
 	StartY      int

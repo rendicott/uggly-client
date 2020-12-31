@@ -4,3 +4,4 @@ build: format
 format:
 	gofmt -w main.go
 	gofmt -w boxes/boxes.go
+	gofmt -w ugcon/ugcon.go

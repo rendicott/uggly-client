@@ -68,22 +68,22 @@ func sleep() {
 }
 
 func makeboxes(s tcell.Screen, bis []*boxes.DivBox, quit chan struct{}) {
-    // debugSampleRate := 20 // to minimize debug message volume
-    // pixelCount := 0
+	// debugSampleRate := 20 // to minimize debug message volume
+	// pixelCount := 0
 	for _, bi := range bis {
 		for i := 0; i < bi.Width; i++ {
 			for j := 0; j < bi.Height; j++ {
 				x := bi.StartX + i
 				y := bi.StartY + j
-                // if pixelCount % debugSampleRate == 0 {
-                //     fgcolor,_,_ := bi.RawContents[i][j].St.Decompose()
-                //     tcolor := fgcolor.TrueColor()
-                //     loggo.Debug("makeboxes setting pixel",
-                //         "content",string(bi.RawContents[i][j].C),
-                //         "stylefgcolor", tcolor,
-                //     )
-                // }
-                // pixelCount++
+				// if pixelCount % debugSampleRate == 0 {
+				//     fgcolor,_,_ := bi.RawContents[i][j].St.Decompose()
+				//     tcolor := fgcolor.TrueColor()
+				//     loggo.Debug("makeboxes setting pixel",
+				//         "content",string(bi.RawContents[i][j].C),
+				//         "stylefgcolor", tcolor,
+				//     )
+				// }
+				// pixelCount++
 				s.SetContent(
 					x,
 					y,
@@ -136,11 +136,11 @@ func main() {
 		// convert and mate textBlobs to boxes
 		tb, err := ugcon.ConvertTextBlobUgglyBoxes(ele)
 		handle(err)
-        fgcolor, _, _ := tb.Style.Decompose()
-        tcolor := fgcolor.TrueColor()
-        loggo.Debug("style after converstion","function","main",
-            "fgcolor", tcolor,
-        )
+		fgcolor, _, _ := tb.Style.Decompose()
+		tcolor := fgcolor.TrueColor()
+		loggo.Debug("style after converstion", "function", "main",
+			"fgcolor", tcolor,
+		)
 		tb.MateBoxes(myBoxes)
 	}
 	tcell.SetEncodingFallback(tcell.EncodingFallbackASCII)
