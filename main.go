@@ -6,6 +6,7 @@ import (
 	"github.com/inconshreveable/log15"
 	pb "github.com/rendicott/uggly"
 	"github.com/rendicott/uggly-client/boxes"
+	"github.com/rendicott/uggly-client/ugcon"
 	"google.golang.org/grpc"
 	"os"
 	"time"
@@ -23,7 +24,7 @@ func setLogger(daemonFlag bool, logFileS, loglevel string) {
 			log15.LvlFilterHandler(
 				log15.LvlDebug,
 				log15.Must.FileHandler(logFileS, log15.JsonFormat())))
-    } else if daemonFlag && loglevel == "info" {
+	} else if daemonFlag && loglevel == "info" {
 		loggo.SetHandler(
 			log15.LvlFilterHandler(
 				log15.LvlInfo,
@@ -50,13 +51,14 @@ func setLogger(daemonFlag bool, logFileS, loglevel string) {
 var (
 	daemonFlag = true
 	logFile    = "ttt.log.json"
+	//logLevel   = "info"
 	logLevel   = "debug"
 	serverAddr = "localhost:10000"
 )
 
 func handle(err error) {
 	if err != nil {
-        loggo.Error("generic error", "error", err.Error())
+		loggo.Error("generic error", "error", err.Error())
 		os.Exit(1)
 	}
 }
@@ -66,11 +68,22 @@ func sleep() {
 }
 
 func makeboxes(s tcell.Screen, bis []*boxes.DivBox, quit chan struct{}) {
+    // debugSampleRate := 20 // to minimize debug message volume
+    // pixelCount := 0
 	for _, bi := range bis {
 		for i := 0; i < bi.Width; i++ {
 			for j := 0; j < bi.Height; j++ {
 				x := bi.StartX + i
 				y := bi.StartY + j
+                // if pixelCount % debugSampleRate == 0 {
+                //     fgcolor,_,_ := bi.RawContents[i][j].St.Decompose()
+                //     tcolor := fgcolor.TrueColor()
+                //     loggo.Debug("makeboxes setting pixel",
+                //         "content",string(bi.RawContents[i][j].C),
+                //         "stylefgcolor", tcolor,
+                //     )
+                // }
+                // pixelCount++
 				s.SetContent(
 					x,
 					y,
@@ -86,6 +99,8 @@ func makeboxes(s tcell.Screen, bis []*boxes.DivBox, quit chan struct{}) {
 
 func main() {
 	setLogger(daemonFlag, logFile, logLevel)
+	boxes.Loggo = loggo
+	ugcon.Loggo = loggo
 	// set up rpc client
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithInsecure())
@@ -111,29 +126,23 @@ func main() {
 	// now convert server divs to boxes
 	var myBoxes []*boxes.DivBox
 	for _, div := range feed.DivBoxes.Boxes {
-		b := boxes.DivBox{
-            Name:       div.Name,
-			Border:     div.Border,
-			BorderW:    int(div.BorderW),
-			BorderChar: rune(div.BorderChar),
-			FillChar:   rune(div.FillChar),
-			StartX:     int(div.StartX),
-			StartY:     int(div.StartY),
-			Width:      int(div.Width),
-			Height:     int(div.Height),
-		}
-		myBoxes = append(myBoxes, &b)
+		// convert divboxes to local format
+		b, err := ugcon.ConvertDivBoxUgglyBoxes(div)
+		handle(err)
+		myBoxes = append(myBoxes, b)
 	}
-    // collect elements from feed
-    for _, ele := range feed.Elements.TextBlobs {
-        tb := boxes.TextBlob{
-            Content: ele.Content,
-            Wrap: ele.Wrap,
-            DivNames: ele.DivNames,
-        }
-        // mate textBlobs to boxes
-        tb.MateBoxes(myBoxes)
-    }
+	// collect elements from feed
+	for _, ele := range feed.Elements.TextBlobs {
+		// convert and mate textBlobs to boxes
+		tb, err := ugcon.ConvertTextBlobUgglyBoxes(ele)
+		handle(err)
+        fgcolor, _, _ := tb.Style.Decompose()
+        tcolor := fgcolor.TrueColor()
+        loggo.Debug("style after converstion","function","main",
+            "fgcolor", tcolor,
+        )
+		tb.MateBoxes(myBoxes)
+	}
 	tcell.SetEncodingFallback(tcell.EncodingFallbackASCII)
 	s, err := tcell.NewScreen()
 	handle(err)
@@ -143,7 +152,6 @@ func main() {
 		Foreground(tcell.ColorWhite).
 		Background(tcell.Color220))
 	s.Clear()
-	boxes.Loggo = loggo
 	quit := make(chan struct{})
 	go func() {
 		for {
@@ -165,38 +173,6 @@ func main() {
 
 	cnt := 0
 	dur := time.Duration(0)
-	// myBoxes := []*boxes.DivBox{
-	// 	&boxes.DivBox{
-	// 	    Border: true,
-	// 	    BorderW: 1,
-	// 	    BorderChar: '+',
-	// 	    FillChar: ' ',
-	// 	    StartX: 8,
-	// 	    StartY: 8,
-	// 	    Width: 40,
-	// 	    Height: 8,
-	// 	},
-	// 	&boxes.DivBox{
-	// 		Border:     true,
-	// 		BorderW:    1,
-	// 		FillChar:   '*',
-	// 		BorderChar: '$',
-	// 		StartX:     8,
-	// 		StartY:     18,
-	// 		Width:      8,
-	// 		Height:     12,
-	// 	},
-	// 	&boxes.DivBox{
-	// 		Border:     true,
-	// 		BorderW:    1,
-	// 		FillChar:   ' ',
-	// 		BorderChar: '$',
-	// 		StartX:     45,
-	// 		StartY:     18,
-	// 		Width:      12,
-	// 		Height:     12,
-	// 	},
-	// }
 	for _, bi := range myBoxes {
 		bi.Init()
 	}
