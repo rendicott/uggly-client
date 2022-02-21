@@ -150,7 +150,7 @@ func main() {
 	handle(err)
 	s.SetStyle(tcell.StyleDefault.
 		Foreground(tcell.ColorWhite).
-		Background(tcell.Color220))
+		Background(tcell.ColorBlack))
 	s.Clear()
 	quit := make(chan struct{})
 	go func() {
