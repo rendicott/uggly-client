@@ -9,6 +9,7 @@ replace github.com/rendicott/uggly-client/ugcon => ./ugcon
 replace github.com/rendicott/uggly => ../uggly
 
 require (
+	github.com/AlecAivazis/survey/v2 v2.3.2
 	github.com/gdamore/tcell v1.4.0 // indirect
 	github.com/gdamore/tcell/v2 v2.1.0
 	github.com/go-stack/stack v1.8.0 // indirect

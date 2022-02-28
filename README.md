@@ -2,6 +2,6 @@
 
 Sample client to test out the TUIOW (terminal user interface over the wire) proof of concept.
 
-TODO: add configurable server address next.
+TODO: add link support
 
 ![](./uggly-shot.png)

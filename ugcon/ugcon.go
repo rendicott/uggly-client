@@ -11,6 +11,8 @@ import (
 
 var Loggo log15.Logger
 
+// setStyle takes a foreground and background color string and 
+// converts it to a tcell Style struct
 func setStyle(fgcolor, bgcolor string) (style *tcell.Style) {
 	var st tcell.Style
 	if fgcolor != "" {
@@ -36,7 +38,6 @@ func setStyle(fgcolor, bgcolor string) (style *tcell.Style) {
 func ConvertTextBlobUgglyBoxes(
 	utb *uggly.TextBlob) (*boxes.TextBlob, error) {
 	var err error
-	Loggo.Info("entering ConvertTextBlobUgglyBoxes")
 	tb := boxes.TextBlob{
 		Content:  &utb.Content,
 		Wrap:     utb.Wrap,
@@ -46,7 +47,6 @@ func ConvertTextBlobUgglyBoxes(
 	if utb.Style != nil {
 		tb.Style = setStyle(utb.Style.Fg, utb.Style.Bg)
 	} else {
-		Loggo.Info("setting default textblob style")
 		tb.Style = &tcell.StyleDefault
 	}
 	return &tb, err
@@ -71,18 +71,14 @@ func ConvertDivBoxUgglyBoxes(
 		// FillSt:      *tcell.Style
 	}
 	if udb.BorderSt != nil {
-		Loggo.Debug("lookup borderst color", "uggcolor", udb.BorderSt.Fg)
-		colorFg := tcell.GetColor(udb.BorderSt.Fg)
-		Loggo.Debug("got borderst fg color", "tcellcolor", colorFg)
+		//colorFg := tcell.GetColor(udb.BorderSt.Fg)
 		b.BorderSt = setStyle(udb.BorderSt.Fg, udb.BorderSt.Bg)
 	} else {
-		Loggo.Info("setting default borderSt style")
 		b.BorderSt = &tcell.StyleDefault
 	}
 	if udb.FillSt != nil {
 		b.FillSt = setStyle(udb.FillSt.Fg, udb.FillSt.Bg)
 	} else {
-		Loggo.Info("setting default fillSt style")
 		b.FillSt = &tcell.StyleDefault
 	}
 	return &b, err
