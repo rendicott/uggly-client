@@ -33,9 +33,9 @@ func setStyle(fgcolor, bgcolor string) (style *tcell.Style) {
 	return style
 }
 
-// ConvertTextBlobUgglyBoxes converts an uggly
+// ConvertTextBlobLocalBoxes converts an uggly
 // formatted TextBlob into a Boxes package version
-func ConvertTextBlobUgglyBoxes(
+func ConvertTextBlobLocalBoxes(
 	utb *uggly.TextBlob) (*boxes.TextBlob, error) {
 	var err error
 	tb := boxes.TextBlob{
@@ -52,9 +52,9 @@ func ConvertTextBlobUgglyBoxes(
 	return &tb, err
 }
 
-// ConvertDivBoxUgglyBoxes converts an uggly
+// ConvertDivBoxLocalBoxes converts an uggly
 // formatted DivBox into a Boxes package version
-func ConvertDivBoxUgglyBoxes(
+func ConvertDivBoxLocalBoxes(
 	udb *uggly.DivBox) (*boxes.DivBox, error) {
 	var err error
 	b := boxes.DivBox{

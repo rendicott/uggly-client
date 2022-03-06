@@ -59,6 +59,7 @@ var (
 	logLevel = flag.String("loglevel", "info", "log level 'info' or 'debug'")
 	host     = flag.String("host", "localhost", "the host to connect to")
 	port     = flag.String("port", "443", "the port to connect to")
+	logPane = flag.Bool("log-pane", false, "whether or not to include a client logging pane for debugging")
 )
 
 func handle(err error) {
@@ -70,6 +71,82 @@ func handle(err error) {
 
 func sleep() {
 	time.Sleep(10 * time.Millisecond)
+}
+
+
+// convertStringCharRune takes a string and converts it to a rune slice
+// then grabs the rune at index 0 in the slice so that it can return 
+// an int32 to satisfy the Uggly protobuf struct for border and fill chars
+// and such. If the input string is less than zero length then it will just 
+// rune out a space char and return that int32. 
+func convertStringCharRune(s string) (int32) {
+	if len(s) == 0 {
+		s = " "
+	}
+	runes := []rune(s)
+	return runes[0]
+}
+
+func buildMenuSite(width, height int) (*pb.SiteResponse) {
+	// since we already have functions for converting to divboxes
+	// we'll just build a local siteResponse
+	localSite := pb.SiteResponse{
+		Name: "uggcli-menu",
+		DivBoxes: &pb.DivBoxes{},
+		Elements: &pb.Elements{},
+	}
+	menuBar := pb.DivBox{
+		Name: "uggcli-menu",
+		Border: false,
+		FillChar: convertStringCharRune(" "),
+		StartX: 0,
+		StartY: 0,
+		Width: int32(width),
+		Height: int32(height),
+		FillSt: &pb.Style {
+			Fg: "black",
+			Bg: "black",
+			Attr: "4",
+		},
+	}
+	localSite.DivBoxes.Boxes = append(localSite.DivBoxes.Boxes, &menuBar)
+	menuContent := pb.TextBlob{
+		Content: "uggcli-menu ===  Browse (F1)   Exit (F12)",
+		Wrap: true,
+		Style: &pb.Style{
+			Fg: "white",
+			Bg: "black",
+			Attr: "4",
+		},
+		DivNames: []string{"uggcli-menu"},
+	}
+	localSite.Elements.TextBlobs = append(localSite.Elements.TextBlobs, &menuContent)
+	linkBrowse := &pb.Link{
+		KeyStroke: "F1",
+		SiteName: "basic",
+		Server: "",
+		Port: int32(10000),
+	}
+	localSite.Links = append(localSite.Links, linkBrowse)
+	return &localSite
+}
+
+func injectMenu(screen tcell.Screen, bis []*boxes.DivBox) (boxesWithMenu []*boxes.DivBox, links []*link, err error) {
+	// makes boxes for the uggcli menu top bar
+	screenWidth, _ := screen.Size() // returns width, height
+	menuHeight := 1
+	localSite := buildMenuSite(screenWidth, menuHeight)
+	links, err = parseLinks(localSite)
+	if err != nil {
+		return boxesWithMenu, links, err
+	}
+	boxesWithMenu, _ = compileBoxes(localSite)
+	// shift all boxes down the height of the menu and add to final slice
+	for _, bi := range(bis) {
+		bi.StartY += menuHeight
+		boxesWithMenu = append(boxesWithMenu, bi)
+	}
+	return boxesWithMenu, links, err
 }
 
 func makeboxes(s tcell.Screen, bis []*boxes.DivBox, quit chan struct{}) {
@@ -90,7 +167,6 @@ func makeboxes(s tcell.Screen, bis []*boxes.DivBox, quit chan struct{}) {
 	}
 	s.Show()
 }
-
 
 
 func promptSites(feed *pb.FeedResponse) (siteName string, err error) {
@@ -166,7 +242,7 @@ func compileBoxes(site *pb.SiteResponse) ([]*boxes.DivBox, error) {
 	var err error
 	for _, div := range site.DivBoxes.Boxes {
 		// convert divboxes to local format
-		b, err := ugcon.ConvertDivBoxUgglyBoxes(div)
+		b, err := ugcon.ConvertDivBoxLocalBoxes(div)
 		if err != nil {
 			return myBoxes, err
 		}
@@ -175,15 +251,18 @@ func compileBoxes(site *pb.SiteResponse) ([]*boxes.DivBox, error) {
 	// collect elements from site
 	for _, ele := range site.Elements.TextBlobs {
 		// convert and mate textBlobs to boxes
-		tb, err := ugcon.ConvertTextBlobUgglyBoxes(ele)
+		tb, err := ugcon.ConvertTextBlobLocalBoxes(ele)
 		if err != nil {
 			return myBoxes, err
 		}
 		fgcolor, _, _ := tb.Style.Decompose()
 		tcolor := fgcolor.TrueColor()
-		loggo.Debug("style after converstion", "function", "main",
-			"fgcolor", tcolor,
+		loggo.Debug("style after converstion",
+			"fgcolor", tcolor, "site-name", site.Name,
 		)
+		if site.Name == "uggcli-menu" {
+			loggo.Debug("got menu textblob", "content", ele.Content)
+		}
 		tb.MateBoxes(myBoxes)
 	}
 	for _, bi := range myBoxes {
@@ -209,18 +288,15 @@ func initScreen() (tcell.Screen, error) {
 	return screen, err
 }
 
-type session struct {
-	conn  *grpc.ClientConn
-	sites []string
-}
 
-func pollEvents(screen tcell.Screen, quitChan chan struct{}) {
+func pollEvents(screen tcell.Screen, links []*link, quitChan chan struct{}) {
+	loggo.Info("got link list", "len", len(links))
 	for {
 		ev := screen.PollEvent()
 		switch ev := ev.(type) {
 		case *tcell.EventKey:
 			switch ev.Key() {
-			case tcell.KeyEscape, tcell.KeyEnter:
+			case tcell.KeyF12:
 				close(quitChan)
 				return
 			case tcell.KeyCtrlL:
@@ -230,6 +306,39 @@ func pollEvents(screen tcell.Screen, quitChan chan struct{}) {
 			screen.Sync()
 		}
 	}
+}
+
+type link struct{
+	keyStroke tcell.Key
+	siteName string
+	server string
+	port int
+	connString string
+}
+
+func parseLinks(site *pb.SiteResponse) (links []*link, err error) {
+	for _, l := range(site.Links) {
+		var tempLink link
+		tempLink.siteName = l.SiteName
+		tempLink.server = l.Server
+		tempLink.port = int(l.Port)
+		tempLink.connString = fmt.Sprintf("%s:%d", tempLink.server, tempLink.port)
+		foundKey := false
+		for key, name := range(tcell.KeyNames) {
+			if l.KeyStroke == name {
+				foundKey = true
+				tempLink.keyStroke = key
+			}
+		}
+		if !foundKey {
+			msg := fmt.Sprintf("no keystroke could be mapped for keystring '%s'", l.KeyStroke)
+			err = errors.New(msg)
+			return links, err
+		}
+		loggo.Info("detected key for link", "string", l.KeyStroke)
+		links = append(links, &tempLink)
+	}
+	return links, err
 }
 
 func main() {
@@ -262,19 +371,33 @@ func main() {
 		loggo.Error("error compiling boxes", "err", err.Error())
 		os.Exit(1)
 	}
+	links, err := parseLinks(site)
+	if err != nil {
+		loggo.Error("error parsing links", "err", err.Error())
+		os.Exit(1)
+	}
 	screen, err := initScreen()
 	if err != nil {
 		loggo.Error("error intitializing screen", "err", err.Error())
 		os.Exit(1)
 	}
+	// always inject menu
+	myBoxes, links, err = injectMenu(screen, myBoxes)
+	if err != nil {
+		loggo.Error("error injecting menu", "err", err.Error())
+		os.Exit(1)
+	}
+	for _, ml := range(links) {
+		links = append(links, ml)
+	}
 	quit := make(chan struct{})
-	go pollEvents(screen, quit)
+	go pollEvents(screen, links, quit)
 
-something:
+drawloop:
 	for {
 		select {
 		case <-quit:
-			break something
+			break drawloop
 		case <-time.After(time.Millisecond * 200):
 		}
 		makeboxes(screen, myBoxes, quit)
