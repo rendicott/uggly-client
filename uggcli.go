@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"github.com/gdamore/tcell/v2"
@@ -9,8 +8,6 @@ import (
 	pb "github.com/rendicott/uggly"
 	"github.com/rendicott/uggly-client/boxes"
 	"github.com/rendicott/uggly-client/ugcon"
-	"github.com/AlecAivazis/survey/v2"
-	"google.golang.org/grpc"
 	"os"
 	"errors"
 	"time"
@@ -87,10 +84,10 @@ func convertStringCharRune(s string) (int32) {
 	return runes[0]
 }
 
-func buildMenuSite(width, height int) (*pb.SiteResponse) {
+func buildMenuPage(width, height int) (*pb.PageResponse) {
 	// since we already have functions for converting to divboxes
-	// we'll just build a local siteResponse
-	localSite := pb.SiteResponse{
+	// we'll just build a local pageResponse 
+	localPage := pb.PageResponse{
 		Name: "uggcli-menu",
 		DivBoxes: &pb.DivBoxes{},
 		Elements: &pb.Elements{},
@@ -109,7 +106,7 @@ func buildMenuSite(width, height int) (*pb.SiteResponse) {
 			Attr: "4",
 		},
 	}
-	localSite.DivBoxes.Boxes = append(localSite.DivBoxes.Boxes, &menuBar)
+	localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes, &menuBar)
 	menuContent := pb.TextBlob{
 		Content: "uggcli-menu ===  Browse (F1)   Exit (F12)",
 		Wrap: true,
@@ -120,27 +117,27 @@ func buildMenuSite(width, height int) (*pb.SiteResponse) {
 		},
 		DivNames: []string{"uggcli-menu"},
 	}
-	localSite.Elements.TextBlobs = append(localSite.Elements.TextBlobs, &menuContent)
+	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &menuContent)
 	linkBrowse := &pb.Link{
 		KeyStroke: "F1",
-		SiteName: "basic",
+		PageName: "basic",
 		Server: "",
 		Port: int32(10000),
 	}
-	localSite.Links = append(localSite.Links, linkBrowse)
-	return &localSite
+	localPage.Links = append(localPage.Links, linkBrowse)
+	return &localPage
 }
 
 func injectMenu(screen tcell.Screen, bis []*boxes.DivBox) (boxesWithMenu []*boxes.DivBox, links []*link, err error) {
 	// makes boxes for the uggcli menu top bar
 	screenWidth, _ := screen.Size() // returns width, height
 	menuHeight := 1
-	localSite := buildMenuSite(screenWidth, menuHeight)
-	links, err = parseLinks(localSite)
+	localPage := buildMenuPage(screenWidth, menuHeight)
+	links, err = parseLinks(localPage)
 	if err != nil {
 		return boxesWithMenu, links, err
 	}
-	boxesWithMenu, _ = compileBoxes(localSite)
+	boxesWithMenu, _ = compileBoxes(localPage)
 	// shift all boxes down the height of the menu and add to final slice
 	for _, bi := range(bis) {
 		bi.StartY += menuHeight
@@ -169,78 +166,14 @@ func makeboxes(s tcell.Screen, bis []*boxes.DivBox, quit chan struct{}) {
 }
 
 
-func promptSites(feed *pb.FeedResponse) (siteName string, err error) {
-	var sites []string
-	for _, site := range(feed.Sites) {
-		fmt.Println(site.Name)
-		sites = append(sites, site.Name)
-	}
-	loggo.Info("got sites", "len", len(sites))
-	if len(sites) < 1 {
-		err = errors.New("no sites returned from server feed")
-		return siteName, err
-	}
-	if len(sites) == 1 {
-		siteName = sites[0]
-		return siteName, err
-	}
-	prompt := &survey.Select{
-		Message: "Select a site from the server: ",
-		Options: sites,
-	}
-	err = survey.AskOne(prompt, &siteName)
-	return siteName, err
-}
 
-func getConnection(serverAddr string) (conn *grpc.ClientConn, err error) {
-	var opts []grpc.DialOption
-	opts = append(opts, grpc.WithInsecure())
-	opts = append(opts, grpc.WithBlock())
-	fmt.Printf("dialing server %s\n", serverAddr)
-	conn, err = grpc.Dial(serverAddr, opts...)
-	if err != nil {
-		loggo.Error("fail to dial", "error", err.Error())
-	}
-	return conn, err
-}
 
-func browseFeed(conn *grpc.ClientConn) (siteName string, err error) {
-	clientFeed := pb.NewFeedClient(conn)
-	loggo.Info("New feed client created, requesting feed from server")
-	fr := pb.FeedRequest{
-		SendData: true,
-	}
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	feed, err := clientFeed.GetFeed(ctx, &fr)
-	if err != nil {
-		loggo.Error("error getting feed from server", "error", err.Error())
-	}
-	siteName, err = promptSites(feed)
-	if err != nil {
-		loggo.Error("error prompting for site name", "error", err.Error())
-	}
-	return siteName, err
-}
 
-func getSite(conn *grpc.ClientConn, siteName string) (site *pb.SiteResponse , err error) {
-	clientSite := pb.NewSiteClient(conn)
-	loggo.Info("New site client created")
-	sr := pb.SiteRequest{
-		Name: siteName,
-	}
-	// get site from server
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	site, err = clientSite.GetSite(ctx, &sr)
-	if err != nil {
-		loggo.Error("error getting site from server", "error", err.Error())
-	}
-	return site, err
-}
 
-func compileBoxes(site *pb.SiteResponse) ([]*boxes.DivBox, error) {
+func compileBoxes(page *pb.PageResponse) ([]*boxes.DivBox, error) {
 	var myBoxes []*boxes.DivBox
 	var err error
-	for _, div := range site.DivBoxes.Boxes {
+	for _, div := range page.DivBoxes.Boxes {
 		// convert divboxes to local format
 		b, err := ugcon.ConvertDivBoxLocalBoxes(div)
 		if err != nil {
@@ -248,8 +181,8 @@ func compileBoxes(site *pb.SiteResponse) ([]*boxes.DivBox, error) {
 		}
 		myBoxes = append(myBoxes, b)
 	}
-	// collect elements from site
-	for _, ele := range site.Elements.TextBlobs {
+	// collect elements from page 
+	for _, ele := range page.Elements.TextBlobs {
 		// convert and mate textBlobs to boxes
 		tb, err := ugcon.ConvertTextBlobLocalBoxes(ele)
 		if err != nil {
@@ -258,9 +191,9 @@ func compileBoxes(site *pb.SiteResponse) ([]*boxes.DivBox, error) {
 		fgcolor, _, _ := tb.Style.Decompose()
 		tcolor := fgcolor.TrueColor()
 		loggo.Debug("style after converstion",
-			"fgcolor", tcolor, "site-name", site.Name,
+			"fgcolor", tcolor, "page-name", page.Name,
 		)
-		if site.Name == "uggcli-menu" {
+		if page.Name == "uggcli-menu" {
 			loggo.Debug("got menu textblob", "content", ele.Content)
 		}
 		tb.MateBoxes(myBoxes)
@@ -310,16 +243,16 @@ func pollEvents(screen tcell.Screen, links []*link, quitChan chan struct{}) {
 
 type link struct{
 	keyStroke tcell.Key
-	siteName string
+	pageName string
 	server string
 	port int
 	connString string
 }
 
-func parseLinks(site *pb.SiteResponse) (links []*link, err error) {
-	for _, l := range(site.Links) {
+func parseLinks(page *pb.PageResponse) (links []*link, err error) {
+	for _, l := range(page.Links) {
 		var tempLink link
-		tempLink.siteName = l.SiteName
+		tempLink.pageName = l.PageName
 		tempLink.server = l.Server
 		tempLink.port = int(l.Port)
 		tempLink.connString = fmt.Sprintf("%s:%d", tempLink.server, tempLink.port)
@@ -347,38 +280,42 @@ func main() {
 	setLogger(daemonFlag, logFile, *logLevel)
 	boxes.Loggo = loggo
 	ugcon.Loggo = loggo
+	screen, err := initScreen()
+	if err != nil {
+		loggo.Error("error intitializing screen", "err", err.Error())
+		os.Exit(1)
+	}
+	defer screen.Fini()
 	// set up rpc client
-	serverAddr := fmt.Sprintf("%s:%s", *host, *port)
-	conn, err := getConnection(serverAddr)
-	defer conn.Close()
+	s := newSession()
+	// s.setServer(*host, *port)
+	// err := s.getConnection()
+	// //defer conn.Close() moved this off to struct
+	// if err != nil {
+	// 	loggo.Error("dialing server failed", "server", s.connString, "err", err.Error())
+	// 	os.Exit(1)
+	// }
+	// err = s.browseFeed()
+	// if err != nil {
+	// 	loggo.Error("selecting feed failed", "err", err.Error())
+	// 	os.Exit(1)
+	// }
+	// page, err := getPage(s)
+	page, err := s.directDial(*host, *port, "fancy")
 	if err != nil {
-		loggo.Error("dialing server failed", "server", serverAddr, "err", err.Error())
+		loggo.Error("getting page failed", "err", err.Error())
 		os.Exit(1)
 	}
-	siteName, err := browseFeed(conn)
-	if err != nil {
-		loggo.Error("selecting feed failed", "err", err.Error())
-		os.Exit(1)
-	}
-	site, err := getSite(conn, siteName)
-	if err != nil {
-		loggo.Error("getting site failed", "err", err.Error())
-		os.Exit(1)
-	}
+	defer s.conn.Close()
 	// now convert server divs to boxes
-	myBoxes, err := compileBoxes(site)
+	myBoxes, err := compileBoxes(page)
 	if err != nil {
 		loggo.Error("error compiling boxes", "err", err.Error())
 		os.Exit(1)
 	}
-	links, err := parseLinks(site)
+	links, err := parseLinks(page)
 	if err != nil {
 		loggo.Error("error parsing links", "err", err.Error())
-		os.Exit(1)
-	}
-	screen, err := initScreen()
-	if err != nil {
-		loggo.Error("error intitializing screen", "err", err.Error())
 		os.Exit(1)
 	}
 	// always inject menu
@@ -390,18 +327,19 @@ func main() {
 	for _, ml := range(links) {
 		links = append(links, ml)
 	}
+	// set up a break channel for monitoring exit keystrokes
 	quit := make(chan struct{})
 	go pollEvents(screen, links, quit)
-
+	// draw right away so there's no delay to user
+	makeboxes(screen, myBoxes, quit)
 drawloop:
 	for {
 		select {
 		case <-quit:
 			break drawloop
-		case <-time.After(time.Millisecond * 200):
+		// redraw every 2 seconds for resizing
+		case <-time.After(time.Millisecond * 2000):
 		}
 		makeboxes(screen, myBoxes, quit)
 	}
-	//makeboxes(screen, myBoxes, quit)
-	screen.Fini()
 }
