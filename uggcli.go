@@ -9,7 +9,6 @@ import (
 	"github.com/rendicott/uggly-client/boxes"
 	"github.com/rendicott/uggly-client/ugcon"
 	"os"
-	"errors"
 	"time"
 )
 
@@ -56,7 +55,7 @@ var (
 	logLevel = flag.String("loglevel", "info", "log level 'info' or 'debug'")
 	host     = flag.String("host", "localhost", "the host to connect to")
 	port     = flag.String("port", "443", "the port to connect to")
-	logPane = flag.Bool("log-pane", false, "whether or not to include a client logging pane for debugging")
+	logPane  = flag.Bool("log-pane", false, "whether or not to include a client logging pane for debugging")
 )
 
 func handle(err error) {
@@ -70,13 +69,12 @@ func sleep() {
 	time.Sleep(10 * time.Millisecond)
 }
 
-
 // convertStringCharRune takes a string and converts it to a rune slice
-// then grabs the rune at index 0 in the slice so that it can return 
+// then grabs the rune at index 0 in the slice so that it can return
 // an int32 to satisfy the Uggly protobuf struct for border and fill chars
-// and such. If the input string is less than zero length then it will just 
-// rune out a space char and return that int32. 
-func convertStringCharRune(s string) (int32) {
+// and such. If the input string is less than zero length then it will just
+// rune out a space char and return that int32.
+func convertStringCharRune(s string) int32 {
 	if len(s) == 0 {
 		s = " "
 	}
@@ -84,75 +82,33 @@ func convertStringCharRune(s string) (int32) {
 	return runes[0]
 }
 
-func buildMenuPage(width, height int) (*pb.PageResponse) {
-	// since we already have functions for converting to divboxes
-	// we'll just build a local pageResponse 
-	localPage := pb.PageResponse{
-		Name: "uggcli-menu",
-		DivBoxes: &pb.DivBoxes{},
-		Elements: &pb.Elements{},
-	}
-	menuBar := pb.DivBox{
-		Name: "uggcli-menu",
-		Border: false,
-		FillChar: convertStringCharRune(" "),
-		StartX: 0,
-		StartY: 0,
-		Width: int32(width),
-		Height: int32(height),
-		FillSt: &pb.Style {
-			Fg: "black",
-			Bg: "black",
-			Attr: "4",
-		},
-	}
-	localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes, &menuBar)
-	menuContent := pb.TextBlob{
-		Content: "uggcli-menu ===  Browse (F1)   Exit (F12)",
-		Wrap: true,
-		Style: &pb.Style{
-			Fg: "white",
-			Bg: "black",
-			Attr: "4",
-		},
-		DivNames: []string{"uggcli-menu"},
-	}
-	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &menuContent)
-	linkBrowse := &pb.Link{
-		KeyStroke: "F1",
-		PageName: "basic",
-		Server: "",
-		Port: int32(10000),
-	}
-	localPage.Links = append(localPage.Links, linkBrowse)
-	return &localPage
-}
 
-func injectMenu(screen tcell.Screen, bis []*boxes.DivBox) (boxesWithMenu []*boxes.DivBox, links []*link, err error) {
+func injectMenu() (boxesWithMenu []*boxes.DivBox, err error) {
 	// makes boxes for the uggcli menu top bar
 	screenWidth, _ := screen.Size() // returns width, height
-	menuHeight := 1
+	menuHeight := 2
 	localPage := buildMenuPage(screenWidth, menuHeight)
-	links, err = parseLinks(localPage)
+	parseLinks(localPage, true) // retain links when injecting Menu
 	if err != nil {
-		return boxesWithMenu, links, err
+		return boxesWithMenu, err
 	}
 	boxesWithMenu, _ = compileBoxes(localPage)
 	// shift all boxes down the height of the menu and add to final slice
-	for _, bi := range(bis) {
+	// from the global boxes
+	for _, bi := range gBoxes {
 		bi.StartY += menuHeight
 		boxesWithMenu = append(boxesWithMenu, bi)
 	}
-	return boxesWithMenu, links, err
+	return boxesWithMenu, err
 }
 
-func makeboxes(s tcell.Screen, bis []*boxes.DivBox, quit chan struct{}) {
-	for _, bi := range bis {
+func makeboxes() {
+	for _, bi := range gBoxes {
 		for i := 0; i < bi.Width; i++ {
 			for j := 0; j < bi.Height; j++ {
 				x := bi.StartX + i
 				y := bi.StartY + j
-				s.SetContent(
+				screen.SetContent(
 					x,
 					y,
 					bi.RawContents[i][j].C,
@@ -162,13 +118,8 @@ func makeboxes(s tcell.Screen, bis []*boxes.DivBox, quit chan struct{}) {
 			}
 		}
 	}
-	s.Show()
+	screen.Show()
 }
-
-
-
-
-
 
 func compileBoxes(page *pb.PageResponse) ([]*boxes.DivBox, error) {
 	var myBoxes []*boxes.DivBox
@@ -181,7 +132,7 @@ func compileBoxes(page *pb.PageResponse) ([]*boxes.DivBox, error) {
 		}
 		myBoxes = append(myBoxes, b)
 	}
-	// collect elements from page 
+	// collect elements from page
 	for _, ele := range page.Elements.TextBlobs {
 		// convert and mate textBlobs to boxes
 		tb, err := ugcon.ConvertTextBlobLocalBoxes(ele)
@@ -204,74 +155,156 @@ func compileBoxes(page *pb.PageResponse) ([]*boxes.DivBox, error) {
 	return myBoxes, err
 }
 
-func initScreen() (tcell.Screen, error) {
+func initScreen() (s tcell.Screen, err error) {
 	tcell.SetEncodingFallback(tcell.EncodingFallbackASCII)
-	screen, err := tcell.NewScreen()
+	s, err = tcell.NewScreen()
 	if err != nil {
-		return screen, err
+		return s, err
 	}
-	err = screen.Init()
+	err = s.Init()
 	if err != nil {
-		return screen, err
+		return s, err
 	}
-	screen.SetStyle(tcell.StyleDefault.
+	s.SetStyle(tcell.StyleDefault.
 		Foreground(tcell.ColorWhite).
 		Background(tcell.ColorBlack))
-	screen.Clear()
-	return screen, err
+	s.Clear()
+	return s, err
 }
 
+func get(l *link) {
+	loggo.Info("getting link", "connString", l.connString, "pageName", l.pageName)
+	page, err := sess.directDial(l.server, l.port, l.pageName)
+	handle(err)
+	err = renderPage(page)
+	handle(err)
+}
 
-func pollEvents(screen tcell.Screen, links []*link, quitChan chan struct{}) {
-	loggo.Info("got link list", "len", len(links))
+func getLocal(page *pb.PageResponse) {
+	err := renderPage(page)
+	handle(err)
+}
+
+func detectSpecialKey(ev *tcell.EventKey) (isSpecial bool, keyName string) {
+	for k, v := range tcell.KeyNames {
+		if ev.Key() == k {
+			isSpecial = true
+			keyName = v
+		}
+	}
+	return isSpecial, keyName
+}
+
+func handleLinks(ev *tcell.EventKey) {
+	if ev.Key() == tcell.KeyRune {
+		loggo.Info("detected keypress", "key", string(ev.Rune()))
+	} else {
+		_, name := detectSpecialKey(ev)
+		loggo.Info("detected keypress", "key", name)
+	}
+	loggo.Info("checking activeLinks for expected keypresses", "numLinks", len(activeLinks))
+	for _, l := range activeLinks {
+		loggo.Info("checking link", "expectedKey", l.keyStroke)
+		// see if we can detect a special
+		for k, v := range tcell.KeyNames {
+			if v == l.keyStroke {
+				if ev.Key() == k {
+					get(l)
+				}
+			}
+		}
+		// if not special then maybe a rune
+		if ev.Key() == tcell.KeyRune {
+			if l.keyStroke == string(ev.Rune()) {
+				get(l)
+			}
+		}
+	}
+}
+
+func pollEvents() {
 	for {
+		loggo.Info("polling and watching for links", "links", len(activeLinks))
 		ev := screen.PollEvent()
 		switch ev := ev.(type) {
 		case *tcell.EventKey:
 			switch ev.Key() {
 			case tcell.KeyF12:
-				close(quitChan)
+				close(quit)
 				return
 			case tcell.KeyCtrlL:
 				screen.Sync()
+			case tcell.KeyF1:
+				getLocal(buildFeedBrowser())
+			default:
+				handleLinks(ev)
 			}
 		case *tcell.EventResize:
 			screen.Sync()
+		case fakeEvent:
+			loggo.Info("reloading links", "numLinks", len(activeLinks))
 		}
 	}
 }
 
-type link struct{
-	keyStroke tcell.Key
-	pageName string
-	server string
-	port int
+type link struct {
+	keyStroke  string
+	pageName   string
+	server     string
+	port       string
 	connString string
 }
 
-func parseLinks(page *pb.PageResponse) (links []*link, err error) {
-	for _, l := range(page.Links) {
+var activeLinks []*link
+
+type fakeEvent struct{}
+
+func (f fakeEvent) When() time.Time {
+	return time.Now()
+}
+
+func parseLinks(page *pb.PageResponse, retain bool) {
+	if !retain { // clear all the links
+		activeLinks = []*link{}
+		loggo.Info("purged links")
+	}
+	for _, l := range page.Links {
 		var tempLink link
+		tempLink.keyStroke = l.KeyStroke
 		tempLink.pageName = l.PageName
 		tempLink.server = l.Server
-		tempLink.port = int(l.Port)
-		tempLink.connString = fmt.Sprintf("%s:%d", tempLink.server, tempLink.port)
-		foundKey := false
-		for key, name := range(tcell.KeyNames) {
-			if l.KeyStroke == name {
-				foundKey = true
-				tempLink.keyStroke = key
-			}
-		}
-		if !foundKey {
-			msg := fmt.Sprintf("no keystroke could be mapped for keystring '%s'", l.KeyStroke)
-			err = errors.New(msg)
-			return links, err
-		}
-		loggo.Info("detected key for link", "string", l.KeyStroke)
-		links = append(links, &tempLink)
+		tempLink.port = l.Port
+		tempLink.connString = fmt.Sprintf("%s:%s", tempLink.server, tempLink.port)
+		activeLinks = append(activeLinks, &tempLink)
 	}
-	return links, err
+	screen.PostEvent(fakeEvent{})
+	for _, l := range(activeLinks) {
+		loggo.Info("added link to activeLinks", "pageName", l.pageName, "connString", l.connString)
+	}
+}
+
+var sess *session
+var screen tcell.Screen
+var gBoxes []*boxes.DivBox
+var quit chan struct{}
+
+func renderPage(page *pb.PageResponse) (err error) {
+	gBoxes, err = compileBoxes(page)
+	if err != nil {
+		loggo.Error("error compiling boxes", "err", err.Error())
+		return err
+	}
+	parseLinks(page, false)
+	screen.Clear()
+	// always inject menu
+	gBoxes, err = injectMenu()
+	if err != nil {
+		loggo.Error("error injecting menu", "err", err.Error())
+		return err
+	}
+	// draw right away so there's no delay to user
+	makeboxes()
+	return err
 }
 
 func main() {
@@ -280,58 +313,29 @@ func main() {
 	setLogger(daemonFlag, logFile, *logLevel)
 	boxes.Loggo = loggo
 	ugcon.Loggo = loggo
-	screen, err := initScreen()
+	var err error
+	// set up a break channel for monitoring exit keystrokes
+	quit = make(chan struct{})
+	screen, err = initScreen()
 	if err != nil {
-		loggo.Error("error intitializing screen", "err", err.Error())
+		loggo.Error("error initiatiizing screen", "err", err.Error())
 		os.Exit(1)
 	}
 	defer screen.Fini()
 	// set up rpc client
-	s := newSession()
-	// s.setServer(*host, *port)
-	// err := s.getConnection()
-	// //defer conn.Close() moved this off to struct
-	// if err != nil {
-	// 	loggo.Error("dialing server failed", "server", s.connString, "err", err.Error())
-	// 	os.Exit(1)
-	// }
-	// err = s.browseFeed()
-	// if err != nil {
-	// 	loggo.Error("selecting feed failed", "err", err.Error())
-	// 	os.Exit(1)
-	// }
-	// page, err := getPage(s)
-	page, err := s.directDial(*host, *port, "fancy")
+	sess = newSession()
+	page, err := sess.directDial(*host, *port, "fancy")
 	if err != nil {
 		loggo.Error("getting page failed", "err", err.Error())
 		os.Exit(1)
 	}
-	defer s.conn.Close()
-	// now convert server divs to boxes
-	myBoxes, err := compileBoxes(page)
+	defer sess.conn.Close()
+	go pollEvents()
+	err = renderPage(page)
 	if err != nil {
-		loggo.Error("error compiling boxes", "err", err.Error())
+		loggo.Error("error rendering page", "err", err.Error())
 		os.Exit(1)
 	}
-	links, err := parseLinks(page)
-	if err != nil {
-		loggo.Error("error parsing links", "err", err.Error())
-		os.Exit(1)
-	}
-	// always inject menu
-	myBoxes, links, err = injectMenu(screen, myBoxes)
-	if err != nil {
-		loggo.Error("error injecting menu", "err", err.Error())
-		os.Exit(1)
-	}
-	for _, ml := range(links) {
-		links = append(links, ml)
-	}
-	// set up a break channel for monitoring exit keystrokes
-	quit := make(chan struct{})
-	go pollEvents(screen, links, quit)
-	// draw right away so there's no delay to user
-	makeboxes(screen, myBoxes, quit)
 drawloop:
 	for {
 		select {
@@ -340,6 +344,6 @@ drawloop:
 		// redraw every 2 seconds for resizing
 		case <-time.After(time.Millisecond * 2000):
 		}
-		makeboxes(screen, myBoxes, quit)
+		makeboxes()
 	}
 }

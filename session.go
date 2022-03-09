@@ -23,7 +23,7 @@ func (s *session) getConnection() (err error) {
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithInsecure())
 	opts = append(opts, grpc.WithBlock())
-	fmt.Printf("dialing server %s\n", s.connString)
+	loggo.Info("dialing server", "connString", s.connString)
 	s.conn, err = grpc.Dial(s.connString, opts...)
 	if err != nil {
 		loggo.Error("fail to dial", "error", err.Error())
@@ -65,6 +65,32 @@ func (s *session) setServer(host string, port string) {
 	s.server = host
 	s.port = port
 	s.connString = fmt.Sprintf("%s:%s", host, port)
+}
+
+func (s *session) feedLinks() (links []*pb.Link, err error) {
+	clientFeed := pb.NewFeedClient(s.conn)
+	loggo.Info("New feed client created, requesting feed from server")
+	fr := pb.FeedRequest{
+		SendData: true,
+	}
+	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	feed, err := clientFeed.GetFeed(ctx, &fr)
+	if err != nil {
+		loggo.Error("error getting feed from server", "error", err.Error())
+		return links, err
+	}
+	strokeMap := []string{"1","2","3","4","5","6","7","8","9",
+		"a","b","c","d","e","f","g","h","i","j","k","l","m",
+		"n","o","p","q","r","s","t","u","v","w","x","y","z"}
+	for i, page := range(feed.Pages) {
+		links = append(links, &pb.Link{
+			KeyStroke: strokeMap[i],
+			PageName: page.Name,
+			Server: s.server,
+			Port: s.port,
+		})
+	}
+	return links, err
 }
 
 func (s *session) browseFeed() (err error) {
