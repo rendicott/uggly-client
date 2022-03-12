@@ -24,11 +24,6 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 			"function", "addTextBlob",
 		)
 	}
-	Loggo.Debug("rawContents info",
-		"rows", len(bi.RawContents[0]),
-		"cols", len(bi.RawContents),
-		"function", "addTextBlob",
-	)
 	// log some info about colors
 	fg, _, _ := tb.Style.Decompose()
 	Loggo.Debug("have style color",
@@ -37,11 +32,13 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 	)
 	debugSampleRate := 10
 	pixelCount := 0
+	logPixels := false
 	var logPixel bool
 	if pixelCount%debugSampleRate == 0 {
 		logPixel = true
 	}
 	// now fill to max height
+	Loggo.Debug("populating divbox with text chars", "fillHeight", fillHeight)
 	for i := 0; i < fillHeight; i++ {
 		for j, char := range charMap[i] {
 			p := Pixel{
@@ -49,12 +46,14 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 				St:       *tb.Style,
 				IsBorder: false,
 			}
-			if logPixel {
-				Loggo.Debug("setting bi.RawContents",
-					"row", i, "col", j,
-					"pixelCount", pixelCount,
-					"function", "addTextBlob",
-				)
+			if logPixels {
+				if logPixel {
+					Loggo.Debug("setting bi.RawContents",
+						"row", i, "col", j,
+						"pixelCount", pixelCount,
+						"function", "addTextBlob",
+					)
+				}
 			}
 			bi.RawContents[bi.fillX1+j][bi.fillY1+i] = &p
 		}
@@ -162,6 +161,7 @@ func (tb *TextBlob) MateBoxes(bxs []*DivBox) {
 	for _, bx := range bxs {
 		for _, name := range tb.DivNames {
 			if bx.Name == name {
+				Loggo.Debug("appending textBlob to div", "name", name)
 				bx.textBlobs = append(bx.textBlobs, tb)
 			}
 		}

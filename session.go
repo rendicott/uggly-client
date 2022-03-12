@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"context"
 	"time"
-	"errors"
 	"google.golang.org/grpc"
-	"github.com/AlecAivazis/survey/v2"
 	pb "github.com/rendicott/uggly"
 )
 
@@ -93,44 +91,4 @@ func (s *session) feedLinks() (links []*pb.Link, err error) {
 	return links, err
 }
 
-func (s *session) browseFeed() (err error) {
-	clientFeed := pb.NewFeedClient(s.conn)
-	loggo.Info("New feed client created, requesting feed from server")
-	fr := pb.FeedRequest{
-		SendData: true,
-	}
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	feed, err := clientFeed.GetFeed(ctx, &fr)
-	if err != nil {
-		loggo.Error("error getting feed from server", "error", err.Error())
-		return err
-	}
-	s.currPage, err = promptPages(feed)
-	if err != nil {
-		loggo.Error("error prompting for page name", "error", err.Error())
-	}
-	return  err
-}
 
-func promptPages(feed *pb.FeedResponse) (pageName string, err error) {
-	var pages []string
-	for _, page := range(feed.Pages) {
-		fmt.Println(page.Name)
-		pages = append(pages, page.Name)
-	}
-	loggo.Info("got pages", "len", len(pages))
-	if len(pages) < 1 {
-		err = errors.New("no pages returned from server feed")
-		return pageName, err
-	}
-	if len(pages) == 1 {
-		pageName = pages[0]
-		return pageName, err
-	}
-	prompt := &survey.Select{
-		Message: "Select a page from the server: ",
-		Options: pages,
-	}
-	err = survey.AskOne(prompt, &pageName)
-	return pageName, err
-}
