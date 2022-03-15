@@ -85,7 +85,7 @@ func buildStatus(message string, width, height int) *pb.PageResponse {
 // buildPageMenu takes some dimensions as input and generates an uggly.PageResponse
 // which can then be easily rendered back in the browser just like a server
 // response would be.
-func buildPageMenu(width, height int, server, port, page string) *pb.PageResponse {
+func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageResponse {
 	// since we already have functions for converting to divboxes
 	// we'll just build a local pageResponse
 	localPage := pb.PageResponse{
@@ -111,7 +111,7 @@ func buildPageMenu(width, height int, server, port, page string) *pb.PageRespons
 		Name:     "uggcli-addrbar",
 		Border:   false,
 		FillChar: convertStringCharRune(" "),
-		StartX:   2,
+		StartX:   0,
 		StartY:   1,
 		Width:    int32(width),
 		Height:   int32(height)/3,
@@ -125,13 +125,13 @@ func buildPageMenu(width, height int, server, port, page string) *pb.PageRespons
 		Name:     "uggcli-statusbar",
 		Border:   false,
 		FillChar: convertStringCharRune(" "),
-		StartX:   2,
+		StartX:   0,
 		StartY:   2,
 		Width:    int32(width),
 		Height:   int32(height)/3,
 		FillSt: &pb.Style{
 			Fg:   "white",
-			Bg:   "black",
+			Bg:   "white",
 			Attr: "4",
 		},
 	})
@@ -156,11 +156,11 @@ func buildPageMenu(width, height int, server, port, page string) *pb.PageRespons
 		DivNames: []string{"uggcli-addrbar"},
 	})
 	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &pb.TextBlob{
-		Content: "hi",
+		Content: msg,
 		Wrap:    true,
 		Style: &pb.Style{
-			Fg:   "white",
-			Bg:   "green",
+			Fg:   "black",
+			Bg:   "white",
 			Attr: "4",
 		},
 		DivNames: []string{"uggcli-statusbar"},

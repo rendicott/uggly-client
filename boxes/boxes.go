@@ -9,7 +9,7 @@ import (
 var Loggo log15.Logger
 
 func (bi *DivBox) addTextBlob(tb *TextBlob) {
-	Loggo.Info("entering addTextBlob")
+	Loggo.Debug("entering addTextBlob")
 	fillWidth := bi.fillX2 - bi.fillX1
 	fillHeight := bi.fillY2 - bi.fillY1
 	var charMap map[int][]rune
@@ -63,7 +63,7 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 // Init establishes Borders, padding and instantiates
 // Pixelmap with usable space
 func (bi *DivBox) Init() {
-	Loggo.Info("initializing box", "BorderChar", bi.BorderChar)
+	Loggo.Debug("initializing box", "BorderChar", bi.BorderChar)
 	// set BorderW to 0 if Border is false
 	if !bi.Border {
 		bi.BorderW = 0

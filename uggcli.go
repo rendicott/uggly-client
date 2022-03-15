@@ -62,6 +62,15 @@ func setLogger(daemonFlag bool, logFileS, loglevel string) {
 // convertPageBoxes converts an uggly.PageResponse into a boxes.DivBox format
 // which can then be set as content to be drawn later
 func convertPageBoxes(page *pb.PageResponse) (myBoxes []*boxes.DivBox, err error) {
+	if page == nil {
+		return myBoxes, err
+	}
+	if page.DivBoxes == nil {
+		return myBoxes, err
+	}
+	if page.DivBoxes.Boxes == nil {
+		return myBoxes, err
+	}
 	for _, div := range page.DivBoxes.Boxes {
 		// convert divboxes to local format
 		b, err := ugcon.ConvertDivBoxLocalBoxes(div)
@@ -104,6 +113,16 @@ func handle(err error) {
 	if err != nil {
 		loggo.Error("generic error", "error", err.Error())
 		os.Exit(1)
+	}
+}
+
+// handle is a lazy way of handling generic errors within the browser
+// context. Can help make more graceful exits by closing up screens, 
+// connections, etc.
+func (b *ugglyBrowser) handle(err error) {
+	if err != nil {
+		loggo.Error("generic browser error", "error", err.Error())
+		b.exit(1)
 	}
 }
 
@@ -153,23 +172,60 @@ func detectSpecialKey(ev *tcell.EventKey) (isSpecial bool, keyName string) {
 
 func (b *ugglyBrowser) buildContentMenu() {
 	// makes boxes for the uggcli menu top bar
+	var msg string
+	if len(b.messages) > 0 {
+		msg = *b.messages[len(b.messages)-1]
+	} else {
+		msg = ""
+	}
 	localPage := buildPageMenu(
-		b.vW, b.menuHeight, b.sess.server, b.sess.port, b.sess.currPage)
+		b.vW, b.menuHeight, b.sess.server, b.sess.port, b.sess.currPage, msg)
 	b.parseLinks(localPage, true) // retain links when injecting Menu
 	b.contentMenu, _ = convertPageBoxes(localPage)
-	loggo.Info("sending viewTrigger")
-	b.viewTrigger <- int(0)
+	loggo.Debug("sending viewTrigger")
+	select {
+	case <- b.interrupt:
+	    return
+	default:
+		b.viewTrigger <- int(0)
+	}
 }
 
+// menuWatch always watches the message buffer for messages
+// and redraws the menu when it gets user facing messages
+func (b *ugglyBrowser) menuWatch() {
+	for {
+		select {
+		case <- b.interrupt:
+		    return
+		default:
+			msg := <-b.messageBuffer
+			b.messages = append(b.messages, &msg)
+			b.buildContentMenu()
+		}
+	}
+}
 
+// sendMessage can be used to add a message to the buffer and 
+// can be called a goroutine for lazy message sending
+func (b *ugglyBrowser) sendMessage(msg string) {
+	b.messageBuffer<-msg
+}
 
 func (b *ugglyBrowser) get(l *link) {
-	loggo.Info("getting link", "connString", l.connString, "pageName", l.pageName)
+	dest := fmt.Sprintf("%s:%s", l.server, l.port)
+	loggo.Info("getting link", "connString", dest, "pageName", l.pageName)
 	var err error
+	go b.sendMessage(fmt.Sprintf("dialing server '%s'...", dest))
 	b.currentPage, err = b.sess.directDial(l.server, l.port, l.pageName)
-	handle(err)
+	if err.Error() == "context deadline exceeded" {
+		go b.sendMessage(fmt.Sprintf("connection timeout to '%s'", dest))
+		return
+	} else if err != nil {
+		b.handle(err)
+	}
 	loggo.Info("rendering")
-	handle(b.buildDraw())
+	b.handle(b.buildDraw())
 }
 
 func (b *ugglyBrowser) handleLinks(ev *tcell.EventKey) {
@@ -202,10 +258,27 @@ func (b *ugglyBrowser) handleLinks(ev *tcell.EventKey) {
 func (b *ugglyBrowser) getFeed() {
 	loggo.Info("getting feed")
 	links, err := b.sess.feedLinks()
-	handle(err)
-	b.currentPage = buildFeedBrowser(b.vW, links)
-	loggo.Info("building feed")
-	handle(b.buildDraw())
+	if err.Error() == "no server connection" {
+		msg := "unable to connect to server"
+		b.messages = append(b.messages, &msg)
+	} else if err != nil {
+		b.handle(err)
+	} else {
+		loggo.Info("building feed")
+		b.currentPage = buildFeedBrowser(b.vW, links)
+	}
+	// regardless, redraw
+	b.handle(b.buildDraw())
+}
+
+func (b *ugglyBrowser) exit(code int) {
+	loggo.Info("caught exit interrupt", "code", code)
+	b.exitFlag = true // in case other go routines are watching
+	close(b.viewTrigger)
+	close(b.interrupt)
+	close(b.messageBuffer)
+	b.view.Fini()
+	os.Exit(code)
 }
 
 func (b *ugglyBrowser) pollEvents() {
@@ -216,8 +289,7 @@ func (b *ugglyBrowser) pollEvents() {
 		case *tcell.EventKey:
 			switch ev.Key() {
 			case tcell.KeyF12:
-				loggo.Info("caught exit interrupt")
-				close(b.interrupt)
+				b.exit(0)
 				return
 			case tcell.KeyCtrlL:
 				b.view.Sync()
@@ -254,7 +326,7 @@ func (f fakeEvent) When() time.Time {
 
 func (b *ugglyBrowser) updateAll() {
 	b.buildContentMenu()
-	handle(b.buildDraw())
+	b.handle(b.buildDraw())
 }
 
 func (b *ugglyBrowser) resizeHandler() {
@@ -269,6 +341,12 @@ func (b *ugglyBrowser) parseLinks(page *pb.PageResponse, retain bool) {
 	if !retain { // clear all the links
 		b.activeLinks = []*link{}
 		loggo.Info("purged links")
+	}
+	if page == nil {
+		return
+	}
+	if page.Links == nil {
+		return
 	}
 	for _, l := range page.Links {
 		var tempLink link
@@ -320,13 +398,15 @@ type ugglyBrowser struct {
 	currentPage *pb.PageResponse
 	interrupt chan struct{}
 	sess *session
-	messages chan string
+	messages []*string
+	messageBuffer chan string
 	viewTrigger chan int // view redraws on trigger
 	resizeBuffer chan int
 	resizing bool
 	resizeDelay time.Duration
 	activeLinks []*link
 	menuHeight int
+	exitFlag bool
 	vH int // view height (updates on resize event)
 	vW int // view width (updates on resize event)
 }
@@ -335,10 +415,10 @@ func newBrowser() (*ugglyBrowser) {
 	b := ugglyBrowser{}
 	b.menuHeight = 3
 	b.resizeDelay = 1500*time.Millisecond
-	b.messages = make(chan string)
 	b.interrupt = make(chan struct{})
 	b.viewTrigger = make(chan int)
 	b.resizeBuffer = make (chan int)
+	b.messageBuffer = make(chan string)
 	b.content = make([]*boxes.DivBox, 0)
 	b.contentMenu = make([]*boxes.DivBox, 0)
 	b.contentExt = make([]*boxes.DivBox, 0)
@@ -354,6 +434,7 @@ func (b *ugglyBrowser) start() (err error) {
 	// draw a blank page with menu to start
 	go b.pollEvents()
 	go b.drawContent()
+	go b.menuWatch()
 	loggo.Info("building menu content")
 	b.buildContentMenu()
 	startLink := link{
@@ -379,8 +460,9 @@ browloop:
 // then draws to screen
 func (b *ugglyBrowser) drawContent() {
 	for {
-		loggo.Info("waiting for viewTrigger")
+		loggo.Debug("waiting for viewTrigger")
 		<-b.viewTrigger // blocks waiting for trigger
+		if b.exitFlag { return }
 		loggo.Debug("drawing content")
 		b.content = make([]*boxes.DivBox, 0) // purge content
 		// populate content with menu

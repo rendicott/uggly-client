@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"context"
+	"errors"
 	"time"
 	"google.golang.org/grpc"
 	pb "github.com/rendicott/uggly"
@@ -22,10 +23,13 @@ func (s *session) getConnection() (err error) {
 	opts = append(opts, grpc.WithInsecure())
 	opts = append(opts, grpc.WithBlock())
 	loggo.Info("dialing server", "connString", s.connString)
-	s.conn, err = grpc.Dial(s.connString, opts...)
+	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	s.conn, err = grpc.DialContext(ctx, s.connString, opts...)
 	if err != nil {
 		loggo.Error("fail to dial", "error", err.Error())
+		return err
 	}
+	loggo.Info("connection successful", "connString", s.connString)
 	return err
 }
 
@@ -66,6 +70,12 @@ func (s *session) setServer(host string, port string) {
 }
 
 func (s *session) feedLinks() (links []*pb.Link, err error) {
+	if s.conn == nil {
+		msg := "no server connection"
+		err = errors.New(msg)
+		loggo.Error(msg)
+		return links, err
+	}
 	clientFeed := pb.NewFeedClient(s.conn)
 	loggo.Info("New feed client created, requesting feed from server")
 	fr := pb.FeedRequest{
