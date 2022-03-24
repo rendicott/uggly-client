@@ -9,6 +9,7 @@ import (
 	"github.com/rendicott/uggly-client/boxes"
 	"github.com/rendicott/uggly-client/ugcon"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -107,7 +108,7 @@ func convertPageBoxes(page *pb.PageResponse) (myBoxes []*boxes.DivBox, err error
 	return myBoxes, err
 }
 
-// handle is a lazy way of handling errors until they can be handled with 
+// handle is a lazy way of handling errors until they can be handled with
 // more sophisticated methods
 func handle(err error) {
 	if err != nil {
@@ -117,7 +118,7 @@ func handle(err error) {
 }
 
 // handle is a lazy way of handling generic errors within the browser
-// context. Can help make more graceful exits by closing up screens, 
+// context. Can help make more graceful exits by closing up screens,
 // connections, etc.
 func (b *ugglyBrowser) handle(err error) {
 	if err != nil {
@@ -156,7 +157,6 @@ func initScreen() (s tcell.Screen, err error) {
 	s.SetStyle(tcell.StyleDefault.
 		Foreground(tcell.ColorWhite).
 		Background(tcell.ColorBlack))
-	//s.Clear()
 	return s, err
 }
 
@@ -170,7 +170,7 @@ func detectSpecialKey(ev *tcell.EventKey) (isSpecial bool, keyName string) {
 	return isSpecial, keyName
 }
 
-func (b *ugglyBrowser) buildContentMenu() {
+func (b *ugglyBrowser) buildContentMenu(label string) {
 	// makes boxes for the uggcli menu top bar
 	var msg string
 	if len(b.messages) > 0 {
@@ -181,13 +181,18 @@ func (b *ugglyBrowser) buildContentMenu() {
 	localPage := buildPageMenu(
 		b.vW, b.menuHeight, b.sess.server, b.sess.port, b.sess.currPage, msg)
 	b.parseLinks(localPage, true) // retain links when injecting Menu
-	b.contentMenu, _ = convertPageBoxes(localPage)
+	var err error
+	b.contentMenu, err = convertPageBoxes(localPage)
+	if err != nil {
+		loggo.Error("buildContentMenu convertPageBoxes error", "err", err.Error())
+		return
+	}
 	loggo.Debug("sending viewTrigger")
 	select {
-	case <- b.interrupt:
-	    return
+	case <-b.interrupt:
+		return
 	default:
-		b.viewTrigger <- int(0)
+		b.drawContent()
 	}
 }
 
@@ -196,36 +201,49 @@ func (b *ugglyBrowser) buildContentMenu() {
 func (b *ugglyBrowser) menuWatch() {
 	for {
 		select {
-		case <- b.interrupt:
-		    return
+		case <-b.interrupt:
+			return
 		default:
 			msg := <-b.messageBuffer
 			b.messages = append(b.messages, &msg)
-			b.buildContentMenu()
+			b.buildContentMenu("messageBuffer")
 		}
 	}
 }
 
-// sendMessage can be used to add a message to the buffer and 
+// sendMessage can be used to add a message to the buffer and
 // can be called a goroutine for lazy message sending
-func (b *ugglyBrowser) sendMessage(msg string) {
-	b.messageBuffer<-msg
+func (b *ugglyBrowser) sendMessage(msg, label string) {
+	b.messageBuffer <- msg
 }
 
 func (b *ugglyBrowser) get(l *link) {
 	dest := fmt.Sprintf("%s:%s", l.server, l.port)
 	loggo.Info("getting link", "connString", dest, "pageName", l.pageName)
 	var err error
-	go b.sendMessage(fmt.Sprintf("dialing server '%s'...", dest))
+	// set dimensions so it can be sent by session
+	b.sess.clientWidth = int64(b.vW)
+	b.sess.clientHeight = int64(b.vH)
+	b.sendMessage(fmt.Sprintf("dialing server '%s'...", dest), "getLink-preDial")
 	b.currentPage, err = b.sess.directDial(l.server, l.port, l.pageName)
-	if err.Error() == "context deadline exceeded" {
-		go b.sendMessage(fmt.Sprintf("connection timeout to '%s'", dest))
-		return
-	} else if err != nil {
-		b.handle(err)
+	if err != nil {
+		if err.Error() == "context deadline exceeded" {
+			b.sendMessage(
+				fmt.Sprintf("connection timeout to '%s'", dest), "getLink-timeout")
+			return
+		}
+		if err.Error() == "error getting page from server" {
+			msg := fmt.Sprintf("error getting page '%s' from server", l.pageName)
+			b.sendMessage(msg, "getLink-notfound")
+			loggo.Error(msg)
+		} else {
+			b.handle(err)
+		}
+	} else {
+		b.sendMessage("connected!", "getLink-success")
+		b.currentPageLocal = nil // so refresh knows to get external
+		b.handle(b.buildDraw("getLink"))
 	}
-	loggo.Info("rendering")
-	b.handle(b.buildDraw())
 }
 
 func (b *ugglyBrowser) handleLinks(ev *tcell.EventKey) {
@@ -255,30 +273,64 @@ func (b *ugglyBrowser) handleLinks(ev *tcell.EventKey) {
 	}
 }
 
+func (b *ugglyBrowser) colorDemo() {
+	thisfunc := "colorDemo"
+	b.currentPage = buildColorDemo(b.vW, b.vH)
+	b.currentPageLocal = b.currentPage
+	go b.sendMessage("locally generated color demo to show tcell color capabilities on this TTY", thisfunc)
+	b.handle(b.buildDraw(thisfunc))
+}
+
 func (b *ugglyBrowser) getFeed() {
+	thisfunc := "geedFeed"
+	feedErrMsg := "no server connection"
+	feedErrMsgNoFeed := "server provides no feed"
 	loggo.Info("getting feed")
 	links, err := b.sess.feedLinks()
-	if err.Error() == "no server connection" {
-		msg := "unable to connect to server"
-		b.messages = append(b.messages, &msg)
-	} else if err != nil {
-		b.handle(err)
+	if err != nil {
+		if err.Error() == feedErrMsg {
+			msg := "unable to connect to server"
+			b.sendMessage(msg, thisfunc)
+		} else if err.Error() == feedErrMsgNoFeed {
+			b.sendMessage(feedErrMsgNoFeed, thisfunc)
+		} else {
+			b.handle(err)
+		}
 	} else {
 		loggo.Info("building feed")
 		b.currentPage = buildFeedBrowser(b.vW, links)
+		b.currentPageLocal = b.currentPage
 	}
 	// regardless, redraw
-	b.handle(b.buildDraw())
+	b.handle(b.buildDraw(thisfunc))
 }
 
 func (b *ugglyBrowser) exit(code int) {
 	loggo.Info("caught exit interrupt", "code", code)
 	b.exitFlag = true // in case other go routines are watching
-	close(b.viewTrigger)
 	close(b.interrupt)
 	close(b.messageBuffer)
 	b.view.Fini()
 	os.Exit(code)
+}
+
+func (b *ugglyBrowser) refresh() {
+	if b.currentPageLocal == nil {
+		startLink := link{
+			server:   b.sess.server,
+			port:     b.sess.port,
+			pageName: b.sess.currPage,
+		}
+		loggo.Info("refreshing page from server")
+		b.get(&startLink)
+	} else if b.currentPageLocal != nil {
+		if b.currentPageLocal.Name == "uggcli-colordemo" {
+			b.colorDemo()
+		}
+		if b.currentPageLocal.Name == "uggcli-feedbrowser" {
+			b.getFeed()
+		}
+	}
 }
 
 func (b *ugglyBrowser) pollEvents() {
@@ -295,6 +347,10 @@ func (b *ugglyBrowser) pollEvents() {
 				b.view.Sync()
 			case tcell.KeyF1:
 				b.getFeed()
+			case tcell.KeyF2:
+				b.colorDemo()
+			case tcell.KeyF5:
+				b.refresh()
 			default:
 				b.handleLinks(ev)
 			}
@@ -325,15 +381,22 @@ func (f fakeEvent) When() time.Time {
 }
 
 func (b *ugglyBrowser) updateAll() {
-	b.buildContentMenu()
-	b.handle(b.buildDraw())
+	label := "updateAll"
+	b.buildContentMenu(label)
+	b.handle(b.buildDraw(label))
 }
 
 func (b *ugglyBrowser) resizeHandler() {
 	b.resizing = true
 	<-b.resizeBuffer
 	time.Sleep(b.resizeDelay)
-	b.updateAll()
+	w, h := b.view.Size()
+	b.sess.clientWidth = int64(w)
+	b.sess.clientHeight = int64(h)
+	b.vW = w
+	b.vH = h
+	b.refresh()
+	//b.updateAll()
 	b.resizing = false
 }
 
@@ -368,15 +431,14 @@ func (b *ugglyBrowser) parseLinks(page *pb.PageResponse, retain bool) {
 		b.activeLinks = append(b.activeLinks, &tempLink)
 	}
 	b.view.PostEvent(fakeEvent{})
-	for _, l := range(b.activeLinks) {
+	for _, l := range b.activeLinks {
 		loggo.Info("added link to activeLinks", "pageName", l.pageName, "connString", l.connString)
 	}
 }
 
 // buildDraw takes all of the currently set content in the browser
 // and renders it then triggers a draw action
-func (b *ugglyBrowser) buildDraw() (err error) {
-	b.buildContentMenu()
+func (b *ugglyBrowser) buildDraw(label string) (err error) {
 	b.contentExt, err = convertPageBoxes(b.currentPage)
 	if err != nil {
 		loggo.Error("error compiling boxes", "err", err.Error())
@@ -384,42 +446,84 @@ func (b *ugglyBrowser) buildDraw() (err error) {
 	}
 	b.parseLinks(b.currentPage, false)
 	b.view.Clear()
-	// draw right away so there's no delay to user
-	loggo.Info("sending viewTrigger")
-	b.viewTrigger <- int(0)
+	b.drawContent()
 	return err
 }
 
-type ugglyBrowser struct {
-	view tcell.Screen
-	content []*boxes.DivBox
-	contentMenu []*boxes.DivBox
-	contentExt  []*boxes.DivBox
-	currentPage *pb.PageResponse
-	interrupt chan struct{}
-	sess *session
-	messages []*string
-	messageBuffer chan string
-	viewTrigger chan int // view redraws on trigger
-	resizeBuffer chan int
-	resizing bool
-	resizeDelay time.Duration
-	activeLinks []*link
-	menuHeight int
-	exitFlag bool
-	vH int // view height (updates on resize event)
-	vW int // view width (updates on resize event)
+// drawContent concats the contents of contentMenu and contentExt
+// then draws to screen
+func (b *ugglyBrowser) drawContent() {
+	if b.exitFlag {
+		return
+	}
+	loggo.Debug("drawing content")
+	content := make([]*boxes.DivBox, 0) // work with a local copy
+	loggo.Debug("drawing menu content", "len", len(b.contentMenu))
+	for _, mb := range b.contentMenu {
+		content = append(content, mb)
+	}
+	// add external content to total content shifting it
+	// down the height of the menu
+	loggo.Debug("drawing ext content", "len", len(b.contentExt))
+	for _, bi := range b.contentExt {
+		// since we're modifying positioning lets make a local copy
+		// so as not to modify the source content (4hr bug hunt!)
+		var bj boxes.DivBox
+		bj = *bi
+		if bj.StartY < b.menuHeight { // make sure can't cover menu
+			bj.StartY = 0
+		}
+		bj.StartY += b.menuHeight
+		content = append(content, &bj)
+	}
+	loggo.Debug("drawing all content", "len", len(content))
+	// now actually draw
+	for _, bi := range content {
+		for i := 0; i < bi.Width; i++ {
+			for j := 0; j < bi.Height; j++ {
+				x := bi.StartX + i
+				y := bi.StartY + j
+				b.view.SetContent(
+					x,
+					y,
+					bi.RawContents[i][j].C,
+					nil,
+					bi.RawContents[i][j].St,
+				)
+			}
+		}
+	}
+	b.view.Show()
 }
 
-func newBrowser() (*ugglyBrowser) {
+type ugglyBrowser struct {
+	view             tcell.Screen
+	contentMenu      []*boxes.DivBox
+	screenLock       sync.Mutex
+	contentExt       []*boxes.DivBox
+	currentPage      *pb.PageResponse
+	currentPageLocal *pb.PageResponse // so we don't get from external
+	interrupt        chan struct{}
+	sess             *session
+	messages         []*string
+	messageBuffer    chan string
+	resizeBuffer     chan int
+	resizing         bool
+	resizeDelay      time.Duration
+	activeLinks      []*link
+	menuHeight       int
+	exitFlag         bool
+	vH               int // view height (updates on resize event)
+	vW               int // view width (updates on resize event)
+}
+
+func newBrowser() *ugglyBrowser {
 	b := ugglyBrowser{}
 	b.menuHeight = 3
-	b.resizeDelay = 1500*time.Millisecond
+	b.resizeDelay = 1500 * time.Millisecond
 	b.interrupt = make(chan struct{})
-	b.viewTrigger = make(chan int)
-	b.resizeBuffer = make (chan int)
+	b.resizeBuffer = make(chan int)
 	b.messageBuffer = make(chan string)
-	b.content = make([]*boxes.DivBox, 0)
 	b.contentMenu = make([]*boxes.DivBox, 0)
 	b.contentExt = make([]*boxes.DivBox, 0)
 	b.currentPage = &pb.PageResponse{}
@@ -429,17 +533,19 @@ func newBrowser() (*ugglyBrowser) {
 
 func (b *ugglyBrowser) start() (err error) {
 	b.view, err = initScreen()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	b.vW, b.vH = b.view.Size()
 	// draw a blank page with menu to start
 	go b.pollEvents()
-	go b.drawContent()
+	//go b.drawContent()
 	go b.menuWatch()
 	loggo.Info("building menu content")
-	b.buildContentMenu()
+	b.buildContentMenu("init")
 	startLink := link{
-		server: b.sess.server,
-		port: b.sess.port,
+		server:   b.sess.server,
+		port:     b.sess.port,
 		pageName: b.sess.currPage,
 	}
 	loggo.Info("getting page from server")
@@ -454,48 +560,6 @@ browloop:
 		}
 	}
 	return err
-}
-
-// drawContent concats the contents of contentMenu and contentExt
-// then draws to screen
-func (b *ugglyBrowser) drawContent() {
-	for {
-		loggo.Debug("waiting for viewTrigger")
-		<-b.viewTrigger // blocks waiting for trigger
-		if b.exitFlag { return }
-		loggo.Debug("drawing content")
-		b.content = make([]*boxes.DivBox, 0) // purge content
-		// populate content with menu
-		loggo.Debug("drawing menu content", "len", len(b.contentMenu))
-		for _, mb := range b.contentMenu {
-			b.content = append(b.content, mb)
-		}
-		// add external content to total content shifting it
-		// down the height of the menu
-		loggo.Debug("drawing ext content", "len", len(b.contentExt))
-		for _, bi := range b.contentExt {
-			bi.StartY += b.menuHeight
-			b.content = append(b.content, bi)
-		}
-		loggo.Debug("drawing all content", "len", len(b.content))
-		// now actually draw
-		for _, bi := range b.content{
-			for i := 0; i < bi.Width; i++ {
-				for j := 0; j < bi.Height; j++ {
-					x := bi.StartX + i
-					y := bi.StartY + j
-					b.view.SetContent(
-						x,
-						y,
-						bi.RawContents[i][j].C,
-						nil,
-						bi.RawContents[i][j].St,
-					)
-				}
-			}
-		}
-		b.view.Show()
-	}
 }
 
 var brow *ugglyBrowser

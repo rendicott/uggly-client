@@ -1,22 +1,24 @@
 package main
 
 import (
-	"fmt"
 	"context"
 	"errors"
-	"time"
-	"google.golang.org/grpc"
+	"fmt"
 	pb "github.com/rendicott/uggly"
+	"google.golang.org/grpc"
+	"strings"
+	"time"
 )
 
 type session struct {
-	conn *grpc.ClientConn
-	server  string
-	port    string
-	connString string
-	currPage string
+	conn         *grpc.ClientConn
+	server       string
+	port         string
+	connString   string
+	currPage     string
+	clientWidth  int64
+	clientHeight int64
 }
-
 
 func (s *session) getConnection() (err error) {
 	var opts []grpc.DialOption
@@ -43,22 +45,26 @@ func (s *session) directDial(host, port, page string) (sr *pb.PageResponse, err 
 	return s.getPage()
 }
 
-func (s *session) getPage() (page *pb.PageResponse , err error) {
+func (s *session) getPage() (page *pb.PageResponse, err error) {
 	clientPage := pb.NewPageClient(s.conn)
 	loggo.Info("New page client created")
 	pr := pb.PageRequest{
-		Name: s.currPage,
+		Name:         s.currPage,
+		ClientWidth:  s.clientWidth,
+		ClientHeight: s.clientHeight,
 	}
 	// get page from server
 	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
 	page, err = clientPage.GetPage(ctx, &pr)
 	if err != nil {
 		loggo.Error("error getting page from server", "error", err.Error())
+		// reset err text so we can catch it
+		err = errors.New("error getting page from server")
 	}
 	return page, err
 }
 
-func newSession() (*session) {
+func newSession() *session {
 	var s session
 	return &s
 }
@@ -70,10 +76,11 @@ func (s *session) setServer(host string, port string) {
 }
 
 func (s *session) feedLinks() (links []*pb.Link, err error) {
+	feedErrMsg := "no server connection"
+	feedErrMsgNoFeed := "server provides no feed"
 	if s.conn == nil {
-		msg := "no server connection"
-		err = errors.New(msg)
-		loggo.Error(msg)
+		err = errors.New(feedErrMsg)
+		loggo.Error(feedErrMsg)
 		return links, err
 	}
 	clientFeed := pb.NewFeedClient(s.conn)
@@ -85,20 +92,26 @@ func (s *session) feedLinks() (links []*pb.Link, err error) {
 	feed, err := clientFeed.GetFeed(ctx, &fr)
 	if err != nil {
 		loggo.Error("error getting feed from server", "error", err.Error())
+		if strings.Contains(err.Error(), "connection refused") {
+			// reset err text so we can catch it
+			err = errors.New(feedErrMsg)
+		}
+		if strings.Contains(err.Error(), "unknown service") {
+			// reset err text so we can catch it
+			err = errors.New(feedErrMsgNoFeed)
+		}
 		return links, err
 	}
-	strokeMap := []string{"1","2","3","4","5","6","7","8","9",
-		"a","b","c","d","e","f","g","h","i","j","k","l","m",
-		"n","o","p","q","r","s","t","u","v","w","x","y","z"}
-	for i, page := range(feed.Pages) {
+	strokeMap := []string{"1", "2", "3", "4", "5", "6", "7", "8", "9",
+		"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
+		"n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"}
+	for i, page := range feed.Pages {
 		links = append(links, &pb.Link{
 			KeyStroke: strokeMap[i],
-			PageName: page.Name,
-			Server: s.server,
-			Port: s.port,
+			PageName:  page.Name,
+			Server:    s.server,
+			Port:      s.port,
 		})
 	}
 	return links, err
 }
-
-

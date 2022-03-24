@@ -1,14 +1,15 @@
 package main
 
 import (
-	pb "github.com/rendicott/uggly"
 	"fmt"
+	"github.com/gdamore/tcell/v2"
+	pb "github.com/rendicott/uggly"
 )
 
 func buildFeedBrowser(width int, links []*pb.Link) *pb.PageResponse {
 	height := 36
 	localPage := pb.PageResponse{
-		Name: "uggcli-feedbrowser",
+		Name:     "uggcli-feedbrowser",
 		DivBoxes: &pb.DivBoxes{},
 		Elements: &pb.Elements{},
 	}
@@ -28,9 +29,9 @@ func buildFeedBrowser(width int, links []*pb.Link) *pb.PageResponse {
 	}
 	localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes, &menuBar)
 	contentString := ""
-	for _, l := range(links) {
+	for _, l := range links {
 		contentString += fmt.Sprintf("(%s) %s\n", l.KeyStroke, l.PageName)
-		// need to build 
+		// need to build
 		localPage.Links = append(localPage.Links, l)
 	}
 	feedBrowserContent := pb.TextBlob{
@@ -49,7 +50,7 @@ func buildFeedBrowser(width int, links []*pb.Link) *pb.PageResponse {
 
 func buildStatus(message string, width, height int) *pb.PageResponse {
 	localPage := pb.PageResponse{
-		Name: "uggcli-status",
+		Name:     "uggcli-status",
 		DivBoxes: &pb.DivBoxes{},
 		Elements: &pb.Elements{},
 	}
@@ -81,7 +82,6 @@ func buildStatus(message string, width, height int) *pb.PageResponse {
 	return &localPage
 }
 
-
 // buildPageMenu takes some dimensions as input and generates an uggly.PageResponse
 // which can then be easily rendered back in the browser just like a server
 // response would be.
@@ -100,7 +100,7 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 		StartX:   0,
 		StartY:   0,
 		Width:    int32(width),
-		Height:   int32(height)/3,
+		Height:   int32(height) / 3,
 		FillSt: &pb.Style{
 			Fg:   "black",
 			Bg:   "black",
@@ -114,7 +114,7 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 		StartX:   0,
 		StartY:   1,
 		Width:    int32(width),
-		Height:   int32(height)/3,
+		Height:   int32(height) / 3,
 		FillSt: &pb.Style{
 			Fg:   "white",
 			Bg:   "black",
@@ -128,7 +128,7 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 		StartX:   0,
 		StartY:   2,
 		Width:    int32(width),
-		Height:   int32(height)/3,
+		Height:   int32(height) / 3,
 		FillSt: &pb.Style{
 			Fg:   "white",
 			Bg:   "white",
@@ -136,7 +136,7 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 		},
 	})
 	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &pb.TextBlob{
-		Content: "uggcli-menu ===  Browse Feed (F1)   Exit (F12)",
+		Content: "uggcli-menu ===  Browse Feed (F1)  ColorDemo (F2)   Refresh (F5)    Exit (F12)",
 		Wrap:    true,
 		Style: &pb.Style{
 			Fg:   "white",
@@ -165,12 +165,91 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 		},
 		DivNames: []string{"uggcli-statusbar"},
 	})
-	linkBrowseFeed := &pb.Link{
+	localPage.Links = append(localPage.Links, &pb.Link{
 		KeyStroke: "F1",
 		PageName:  "FEEDBROWSER",
 		Server:    "",
 		Port:      "0",
+	})
+	localPage.Links = append(localPage.Links, &pb.Link{
+		KeyStroke: "F5",
+		PageName:  "REFRESH",
+		Server:    "",
+		Port:      "0",
+	})
+	localPage.Links = append(localPage.Links, &pb.Link{
+		KeyStroke: "F2",
+		PageName:  "COLORDEMO",
+		Server:    "",
+		Port:      "0",
+	})
+	return &localPage
+}
+
+func buildColorDemo(width, height int) *pb.PageResponse {
+	cellW := 22
+	cellH := 4
+	cols := width / cellW
+	rows := height / cellH
+	loggo.Info("buildColorDemo dimensions",
+		"cellW", cellW,
+		"cellH", cellH,
+		"cols", cols,
+		"rows", rows,
+		"clientW", width,
+		"clientH", height,
+	)
+	localPage := pb.PageResponse{
+		Name:     "uggcli-colordemo",
+		DivBoxes: &pb.DivBoxes{},
+		Elements: &pb.Elements{},
 	}
-	localPage.Links = append(localPage.Links, linkBrowseFeed)
+	// convert colorName map to slice so we can grab by index
+	var colors []string
+	for colorName, _ := range tcell.ColorNames {
+		colors = append(colors, colorName)
+	}
+	colorIndex := 0
+	wroteCols := 0
+	wroteRows := 0
+	for i := 1; i < rows+1; i++ { // number of colums
+		wroteCols++
+		for j := 1; j < cols+1; j++ {
+			loggo.Debug("colorGrab", "len(colors)", len(colors), "colorIndex", colorIndex)
+			if colorIndex >= len(colors) {
+				break
+			}
+			colorName := colors[colorIndex]
+			wroteRows++
+			divName := fmt.Sprintf("color-%s", colorName)
+			localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes, &pb.DivBox{
+				Name:     divName,
+				Border:   false,
+				FillChar: convertStringCharRune(""),
+				StartX:   int32(j*cellW - cellW),
+				StartY:   int32(i*cellH - cellH),
+				Width:    int32(cellW),
+				Height:   int32(cellH),
+				FillSt: &pb.Style{
+					Fg:   "",
+					Bg:   colorName,
+					Attr: "4",
+				},
+			})
+			localPage.Elements.TextBlobs = append(
+				localPage.Elements.TextBlobs, &pb.TextBlob{
+					Content: fmt.Sprintf("(%d/%d)\n%s", colorIndex+1, len(colors), colorName),
+					Wrap:    true,
+					Style: &pb.Style{
+						Fg:   "white",
+						Bg:   "black",
+						Attr: "4",
+					},
+					DivNames: []string{divName},
+				})
+			colorIndex++
+		}
+	}
+	loggo.Info("buildColorDemo", "wroteRows", wroteRows, "wroteCols", wroteCols)
 	return &localPage
 }
