@@ -7,6 +7,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/rendicott/uggly"
 	"github.com/rendicott/uggly-client/boxes"
+	"github.com/rendicott/ugform"
 )
 
 var Loggo log15.Logger
@@ -51,9 +52,7 @@ func ConvertTextBlobLocalBoxes(
 	}
 	return &tb, err
 }
-
-// ConvertDivBoxLocalBoxes converts an uggly
-// formatted DivBox into a Boxes package version
+// ConvertDivBoxLocalBoxes converts an uggly // formatted DivBox into a Boxes package version
 func ConvertDivBoxLocalBoxes(
 	udb *uggly.DivBox) (*boxes.DivBox, error) {
 	var err error
@@ -82,4 +81,27 @@ func ConvertDivBoxLocalBoxes(
 		b.FillSt = &tcell.StyleDefault
 	}
 	return &b, err
+}
+
+func ConvertFormLocalForm (uf *uggly.Form, s tcell.Screen) (*ugform.Form, error) {
+	var err error
+	u := ugform.NewForm(s)
+	u.Name = uf.Name
+	for _, tb := range uf.TextBoxes {
+		u.AddTextBox(&ugform.AddTextBoxInput{
+			Name: tb.Name,
+			DefaultValue: tb.DefaultValue,
+			Description: tb.Description,
+			PositionX: int(tb.PositionX),
+			PositionY: int(tb.PositionY),
+			Height: int(tb.Height),
+			Width: int(tb.Width),
+			StyleCursor: *setStyle(tb.StyleCursor.Fg, tb.StyleCursor.Bg),
+			StyleFill: *setStyle(tb.StyleFill.Fg, tb.StyleFill.Bg),
+			StyleText: *setStyle(tb.StyleText.Fg, tb.StyleText.Bg),
+			StyleDescription: *setStyle(tb.StyleDescription.Fg, tb.StyleDescription.Bg),
+			ShowDescription: tb.ShowDescription,
+		})
+	}
+	return u, err
 }

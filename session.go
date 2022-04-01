@@ -16,8 +16,8 @@ type session struct {
 	port         string
 	connString   string
 	currPage     string
-	clientWidth  int64
-	clientHeight int64
+	clientWidth  int32
+	clientHeight int32
 }
 
 func (s *session) getConnection() (err error) {

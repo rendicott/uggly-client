@@ -6,6 +6,14 @@ import (
 	pb "github.com/rendicott/uggly"
 )
 
+func shelp(fg, bg string) *pb.Style {
+	return &pb.Style{
+		Fg:   fg,
+		Bg:   bg,
+		Attr: "4",
+	}
+}
+
 func buildFeedBrowser(width int, links []*pb.Link) *pb.PageResponse {
 	height := 36
 	localPage := pb.PageResponse{
@@ -21,11 +29,7 @@ func buildFeedBrowser(width int, links []*pb.Link) *pb.PageResponse {
 		StartY:   0,
 		Width:    int32(width),
 		Height:   int32(height),
-		FillSt: &pb.Style{
-			Fg:   "grey",
-			Bg:   "black",
-			Attr: "4",
-		},
+		FillSt:   shelp("grey", "black"),
 	}
 	localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes, &menuBar)
 	contentString := ""
@@ -35,13 +39,9 @@ func buildFeedBrowser(width int, links []*pb.Link) *pb.PageResponse {
 		localPage.Links = append(localPage.Links, l)
 	}
 	feedBrowserContent := pb.TextBlob{
-		Content: contentString,
-		Wrap:    true,
-		Style: &pb.Style{
-			Fg:   "white",
-			Bg:   "black",
-			Attr: "4",
-		},
+		Content:  contentString,
+		Wrap:     true,
+		Style:    shelp("white", "black"),
 		DivNames: []string{"uggcli-feedbrowser-list"},
 	}
 	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &feedBrowserContent)
@@ -62,20 +62,12 @@ func buildStatus(message string, width, height int) *pb.PageResponse {
 		StartY:   0,
 		Width:    int32(width),
 		Height:   int32(height),
-		FillSt: &pb.Style{
-			Fg:   "grey",
-			Bg:   "black",
-			Attr: "4",
-		},
+		FillSt:    shelp("grey", "black"),
 	})
 	statusText := pb.TextBlob{
-		Content: message,
-		Wrap:    true,
-		Style: &pb.Style{
-			Fg:   "white",
-			Bg:   "black",
-			Attr: "4",
-		},
+		Content:  message,
+		Wrap:     true,
+		Style:    shelp("white", "black"),
 		DivNames: []string{"uggcli-status"},
 	}
 	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &statusText)
@@ -101,11 +93,7 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 		StartY:   0,
 		Width:    int32(width),
 		Height:   int32(height) / 3,
-		FillSt: &pb.Style{
-			Fg:   "black",
-			Bg:   "black",
-			Attr: "4",
-		},
+		FillSt:    shelp("black", "black"),
 	})
 	localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes, &pb.DivBox{
 		Name:     "uggcli-addrbar",
@@ -115,11 +103,7 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 		StartY:   1,
 		Width:    int32(width),
 		Height:   int32(height) / 3,
-		FillSt: &pb.Style{
-			Fg:   "white",
-			Bg:   "black",
-			Attr: "4",
-		},
+		FillSt:    shelp("white", "black"),
 	})
 	localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes, &pb.DivBox{
 		Name:     "uggcli-statusbar",
@@ -129,44 +113,57 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 		StartY:   2,
 		Width:    int32(width),
 		Height:   int32(height) / 3,
-		FillSt: &pb.Style{
-			Fg:   "white",
-			Bg:   "white",
-			Attr: "4",
-		},
+		FillSt:    shelp("white", "white"),
 	})
 	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &pb.TextBlob{
-		Content: "uggcli-menu ===  Browse Feed (F1)  ColorDemo (F2)   Refresh (F5)    Exit (F12)",
-		Wrap:    true,
-		Style: &pb.Style{
-			Fg:   "white",
-			Bg:   "black",
-			Attr: "4",
-		},
+		Content:  "uggcli-menu ===  Browse Feed (F4)  ColorDemo (F2)   Refresh (F5)    Exit (F12)",
+		Wrap:     true,
+		Style:    shelp("white", "black"),
 		DivNames: []string{"uggcli-menu"},
 	})
-	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &pb.TextBlob{
-		Content: fmt.Sprintf("Host: %s:%s/%s", server, port, page),
-		Wrap:    true,
-		Style: &pb.Style{
-			Fg:   "white",
-			Bg:   "green",
-			Attr: "4",
+	localPage.Elements.Forms = append(localPage.Elements.Forms, &pb.Form{
+		Name:    "address-bar",
+		DivName: "uggcli-addrbar",
+		TextBoxes: []*pb.TextBox{&pb.TextBox{
+			Name:             "connstring",
+			TabOrder:         int32(0),
+			DefaultValue:     fmt.Sprintf("%s:%s/%s", server, port, page),
+			Description:      "Host: (F1)",
+			PositionX:        int32(14),
+			PositionY:        int32(1),
+			Height:           int32(1),
+			Width:            int32(width/2),
+			StyleCursor:      shelp("black", "olive"),
+			StyleFill:        shelp("white", "navy"),
+			StyleText:        shelp("white", "navy"),
+			StyleDescription: shelp("white", "black"),
+			ShowDescription:  true,
+		}},
+		SubmitLink: &pb.Link{ // will be built by submission handler
+			KeyStroke: "F5",
+			PageName:  "REFRESH",
+			Server:    "",
+			Port:      "0",
 		},
-		DivNames: []string{"uggcli-addrbar"},
 	})
+	//localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &pb.TextBlob{
+	//	Content: fmt.Sprintf("Host: %s:%s/%s", server, port, page),
+	//	Wrap:    true,
+	//	Style: &pb.Style{
+	//		Fg:   "white",
+	//		Bg:   "green",
+	//		Attr: "4",
+	//	},
+	//	DivNames: []string{"uggcli-addrbar"},
+	//})
 	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &pb.TextBlob{
-		Content: msg,
-		Wrap:    true,
-		Style: &pb.Style{
-			Fg:   "black",
-			Bg:   "white",
-			Attr: "4",
-		},
+		Content:  msg,
+		Wrap:     true,
+		Style:    shelp("black", "white"),
 		DivNames: []string{"uggcli-statusbar"},
 	})
 	localPage.Links = append(localPage.Links, &pb.Link{
-		KeyStroke: "F1",
+		KeyStroke: "F4",
 		PageName:  "FEEDBROWSER",
 		Server:    "",
 		Port:      "0",
@@ -182,6 +179,10 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 		PageName:  "COLORDEMO",
 		Server:    "",
 		Port:      "0",
+	})
+	localPage.Links = append(localPage.Links, &pb.Link{
+		KeyStroke: "F1",
+		FormName: "address-bar",
 	})
 	return &localPage
 }
@@ -238,13 +239,9 @@ func buildColorDemo(width, height int) *pb.PageResponse {
 			})
 			localPage.Elements.TextBlobs = append(
 				localPage.Elements.TextBlobs, &pb.TextBlob{
-					Content: fmt.Sprintf("(%d/%d)\n%s", colorIndex+1, len(colors), colorName),
-					Wrap:    true,
-					Style: &pb.Style{
-						Fg:   "white",
-						Bg:   "black",
-						Attr: "4",
-					},
+					Content:  fmt.Sprintf("(%d/%d)\n%s", colorIndex+1, len(colors), colorName),
+					Wrap:     true,
+					Style:    shelp("white", "black"),
 					DivNames: []string{divName},
 				})
 			colorIndex++
