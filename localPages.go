@@ -62,7 +62,7 @@ func buildStatus(message string, width, height int) *pb.PageResponse {
 		StartY:   0,
 		Width:    int32(width),
 		Height:   int32(height),
-		FillSt:    shelp("grey", "black"),
+		FillSt:   shelp("grey", "black"),
 	})
 	statusText := pb.TextBlob{
 		Content:  message,
@@ -93,7 +93,7 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 		StartY:   0,
 		Width:    int32(width),
 		Height:   int32(height) / 3,
-		FillSt:    shelp("black", "black"),
+		FillSt:   shelp("black", "black"),
 	})
 	localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes, &pb.DivBox{
 		Name:     "uggcli-addrbar",
@@ -103,7 +103,7 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 		StartY:   1,
 		Width:    int32(width),
 		Height:   int32(height) / 3,
-		FillSt:    shelp("white", "black"),
+		FillSt:   shelp("white", "black"),
 	})
 	localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes, &pb.DivBox{
 		Name:     "uggcli-statusbar",
@@ -113,7 +113,7 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 		StartY:   2,
 		Width:    int32(width),
 		Height:   int32(height) / 3,
-		FillSt:    shelp("white", "white"),
+		FillSt:   shelp("white", "white"),
 	})
 	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &pb.TextBlob{
 		Content:  "uggcli-menu ===  Browse Feed (F4)  ColorDemo (F2)   Refresh (F5)    Exit (F12)",
@@ -132,7 +132,7 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 			PositionX:        int32(14),
 			PositionY:        int32(1),
 			Height:           int32(1),
-			Width:            int32(width/2),
+			Width:            int32(width / 2),
 			StyleCursor:      shelp("black", "olive"),
 			StyleFill:        shelp("white", "navy"),
 			StyleText:        shelp("white", "navy"),
@@ -182,7 +182,7 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 	})
 	localPage.Links = append(localPage.Links, &pb.Link{
 		KeyStroke: "F1",
-		FormName: "address-bar",
+		FormName:  "address-bar",
 	})
 	return &localPage
 }

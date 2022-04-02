@@ -1,4 +1,4 @@
-version := 0.0.3
+version := 0.0.4
 projectName := ugglyc
 packageNameNix := $(projectName)-linux-amd64-$(version).tar.gz
 packageNameMac := $(projectName)-darwin-amd64-$(version).tar.gz
@@ -9,6 +9,7 @@ build_dir_linux := output-linux
 build_dir_mac := output-mac
 build_dir_windows := output-windows
 
+release: build push
 build: format configure build-linux build-mac build-windows
 dev: format configure build-linux test
 devd: format configure build-linux test-delete
@@ -43,3 +44,6 @@ clean:
 		rm -rf $(build_dir_mac)
 		rm -rf $(build_dir_windows)		 
 
+push:
+	git tag v$(version)
+	git push origin v$(version)
