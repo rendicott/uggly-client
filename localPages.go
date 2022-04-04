@@ -115,8 +115,11 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 		Height:   int32(height) / 3,
 		FillSt:   shelp("white", "white"),
 	})
+	menuText := fmt.Sprintf(
+		"uggcli-menu v%s ===  Browse Feed (F4)  ColorDemo (F2)   Refresh (F5)    Exit (F12)",
+		version)
 	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &pb.TextBlob{
-		Content:  "uggcli-menu ===  Browse Feed (F4)  ColorDemo (F2)   Refresh (F5)    Exit (F12)",
+		Content:  ,
 		Wrap:     true,
 		Style:    shelp("white", "black"),
 		DivNames: []string{"uggcli-menu"},

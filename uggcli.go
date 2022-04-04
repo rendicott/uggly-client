@@ -16,6 +16,8 @@ import (
 	"time"
 )
 
+var version string
+
 var (
 	logFile = "uggcli.log.json"
 	//logLevel   = "info"
@@ -23,7 +25,8 @@ var (
 	host     = flag.String("host", "localhost", "the host to connect to")
 	port     = flag.String("port", "443", "the port to connect to")
 	page     = flag.String("page", "home", "the page to connect to, if page is unavailable then client will browse feed instead")
-	logPane  = flag.Bool("log-pane", false, "whether or not to include a client logging pane for debugging")
+
+//	logPane  = flag.Bool("log-pane", false, "whether or not to include a client logging pane for debugging")
 )
 
 // loggo is the global logger
@@ -747,6 +750,8 @@ func main() {
 	// the same time, weird things happen
 	daemonFlag := true
 	setLogger(daemonFlag, logFile, *logLevel)
+	if version == "" { version = "0.0.0" }
+	loggo.Info("uggly-client started", "version", version)
 	// link this logger to sub-packages that support
 	// log15 logger and export their global logger for
 	// modification
@@ -761,11 +766,10 @@ func main() {
 	brow.sess.currPage = *page
 	// start the monostruct
 	err := brow.start()
-	// clean up screen so we don't butcher the user's terminal
 	defer brow.view.Fini()
+	// clean up screen so we don't butcher the user's terminal
 	if err != nil {
 		loggo.Error("error starting browser", "err", err.Error())
 		os.Exit(1)
 	}
-	os.Exit(0)
 }
