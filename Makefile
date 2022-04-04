@@ -44,6 +44,5 @@ clean:
 		rm -rf $(build_dir_mac)
 		rm -rf $(build_dir_windows)		 
 
-push:
-	git tag v$(version)
-	git push origin v$(version)
+release:
+	gh release create v$(version) ./output/*$(version).tar.gz
