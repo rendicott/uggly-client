@@ -50,7 +50,8 @@ NOTE: [Project Gemini](https://gemini.circumlunar.space/) seems to have similar 
 
 # TODO:
 * Add cookie support so custom sessions can be supported.
-* Add TLS to the gRPC connection. Figure out how to manage certs sanely.
+* ~Add TLS to the gRPC connection. Figure out how to manage certs sanely.~ 
+  * Added this but need to figure out how to get better error messages from gRPC. When all the cert stars are not aligned it just times out, e.g., you get a timeout when server doesn't provide chain. 
 * Possibly add the concept of Page streams to support animation or gaming. Should be trivial with gRPC. Would probably add a Page streamer to proto with a time frequency between pages dictated by server with a min/max specified by client. 
 * support more of the underlying tcell screen features such as monochrome detection
 * support sounds?
