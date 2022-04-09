@@ -87,9 +87,11 @@ func ConvertFormLocalForm (uf *uggly.Form, s tcell.Screen) (*ugform.Form, error)
 	var err error
 	u := ugform.NewForm(s)
 	u.Name = uf.Name
+	u.SubmitAction = uf.SubmitLink
 	for _, tb := range uf.TextBoxes {
 		u.AddTextBox(&ugform.AddTextBoxInput{
 			Name: tb.Name,
+			TabOrder: int(tb.TabOrder),
 			DefaultValue: tb.DefaultValue,
 			Description: tb.Description,
 			PositionX: int(tb.PositionX),

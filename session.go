@@ -2,66 +2,87 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	pb "github.com/rendicott/uggly"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"strings"
 	"time"
+	//"crypto/x509"
 )
 
 type session struct {
-	conn         *grpc.ClientConn
-	server       string
-	port         string
-	connString   string
-	currPage     string
-	clientWidth  int32
-	clientHeight int32
+	conn            *grpc.ClientConn
+	server          string
+	port            string
+	connString      string
+	secure, secured bool
+	currPage        string
+	clientWidth     int32
+	clientHeight    int32
 }
 
 func (s *session) getConnection() (err error) {
 	var opts []grpc.DialOption
-	opts = append(opts, grpc.WithInsecure())
 	opts = append(opts, grpc.WithBlock())
+	tempConnString := fmt.Sprintf("%s:%s", s.server, s.port)
 	loggo.Info("dialing server", "connString", s.connString)
 	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	s.conn, err = grpc.DialContext(ctx, s.connString, opts...)
+	if s.secure {
+		//certs, err := x509.SystemCertPool()
+		//if err != nil {
+		//	loggo.Error("error loading system cert pool")
+		//	return err
+		//}
+		config := &tls.Config{
+			//RootCAs: certs,
+		}
+		loggo.Info("attempting secure connection", "host", tempConnString)
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(config)))
+		s.conn, err = grpc.DialContext(ctx, tempConnString, opts...)
+		s.secured = true
+	} else {
+		loggo.Info("attempting insecure connection")
+		opts = append(opts, grpc.WithInsecure())
+		s.conn, err = grpc.DialContext(ctx, tempConnString, opts...)
+		s.secured = false
+	}
 	if err != nil {
 		loggo.Error("fail to dial", "error", err.Error())
+		s.secure = false
 		return err
 	}
 	loggo.Info("connection successful", "connString", s.connString)
 	return err
 }
 
-func (s *session) directDial(host, port, page string) (sr *pb.PageResponse, err error) {
-	s.setServer(host, port)
-	err = s.getConnection()
-	if err != nil {
-		return sr, err
+func (s *session) get2(ctx context.Context, pq *pb.PageRequest) (pr *pb.PageResponse, err error) {
+	loggo.Info("current and desired connection info",
+		"rserver", pq.Server, "rport", pq.Port,
+		"cserver", s.server, "cport", s.port,
+	)
+	if pq.Server == s.server && pq.Port == s.port && s.conn != nil {
+		// no need for new connection so just log
+		loggo.Info("request for same server:port, reusing same connection")
+	} else {
+		loggo.Info("request for new server:port, establishing new connection")
+		s.setServer(pq.Server, pq.Port, pq.Secure)
+		err = s.getConnection()
+		if err != nil {
+			return pr, err
+		}
 	}
-	s.currPage = page
-	return s.getPage()
-}
-
-func (s *session) getPage() (page *pb.PageResponse, err error) {
 	clientPage := pb.NewPageClient(s.conn)
-	loggo.Info("New page client created")
-	pr := pb.PageRequest{
-		Name:         s.currPage,
-		ClientWidth:  s.clientWidth,
-		ClientHeight: s.clientHeight,
-	}
-	// get page from server
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	page, err = clientPage.GetPage(ctx, &pr)
+	pr, err = clientPage.GetPage(ctx, pq)
 	if err != nil {
 		loggo.Error("error getting page from server", "error", err.Error())
 		// reset err text so we can catch it
 		err = errors.New("error getting page from server")
 	}
-	return page, err
+	s.currPage = pq.Name
+	return pr, err
 }
 
 func newSession() *session {
@@ -69,10 +90,20 @@ func newSession() *session {
 	return &s
 }
 
-func (s *session) setServer(host string, port string) {
-	s.server = host
+// setServer just sets things up for dialing the gRPC connection
+// and some place to store our current connection so we can prevent
+// having to redial.
+func (s *session) setServer(server, port string, secure bool) {
+	// borrow link methods to prevent repetition of construct logic
+	var l link
+	l.server = server
+	l.port = port
+	l.secure = secure
+	l.construct()
+	s.connString = l.connString
+	s.server = server
 	s.port = port
-	s.connString = fmt.Sprintf("%s:%s", host, port)
+	s.secure = l.secure
 }
 
 func (s *session) feedLinks() (links []*pb.Link, err error) {

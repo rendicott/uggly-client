@@ -77,7 +77,7 @@ func buildStatus(message string, width, height int) *pb.PageResponse {
 // buildPageMenu takes some dimensions as input and generates an uggly.PageResponse
 // which can then be easily rendered back in the browser just like a server
 // response would be.
-func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageResponse {
+func buildPageMenu(width, height int, server, port, page, msg string, secure bool) *pb.PageResponse {
 	// since we already have functions for converting to divboxes
 	// we'll just build a local pageResponse
 	localPage := pb.PageResponse{
@@ -119,18 +119,25 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 		"uggcli-menu v%s ===  Browse Feed (F4)  ColorDemo (F2)   Refresh (F5)    Exit (F12)",
 		version)
 	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &pb.TextBlob{
-		Content:  ,
+		Content:  menuText,
 		Wrap:     true,
 		Style:    shelp("white", "black"),
 		DivNames: []string{"uggcli-menu"},
 	})
+	addressDescriptionColor := shelp("white", "red")
+	addressPrefix := "ugtp://"
+	if secure {
+		addressPrefix = "ugtps://"
+		addressDescriptionColor = shelp("white", "green")
+	}
 	localPage.Elements.Forms = append(localPage.Elements.Forms, &pb.Form{
 		Name:    "address-bar",
 		DivName: "uggcli-addrbar",
 		TextBoxes: []*pb.TextBox{&pb.TextBox{
-			Name:             "connstring",
-			TabOrder:         int32(0),
-			DefaultValue:     fmt.Sprintf("%s:%s/%s", server, port, page),
+			Name:     "connstring",
+			TabOrder: int32(0),
+			DefaultValue: fmt.Sprintf(
+				"%s%s:%s/%s", addressPrefix, server, port, page),
 			Description:      "Host: (F1)",
 			PositionX:        int32(14),
 			PositionY:        int32(1),
@@ -139,15 +146,10 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 			StyleCursor:      shelp("black", "olive"),
 			StyleFill:        shelp("white", "navy"),
 			StyleText:        shelp("white", "navy"),
-			StyleDescription: shelp("white", "black"),
+			StyleDescription: addressDescriptionColor,
 			ShowDescription:  true,
 		}},
-		SubmitLink: &pb.Link{ // will be built by submission handler
-			KeyStroke: "F5",
-			PageName:  "REFRESH",
-			Server:    "",
-			Port:      "0",
-		},
+		SubmitLink: &pb.Link{}, // will be built by submission handler
 	})
 	//localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &pb.TextBlob{
 	//	Content: fmt.Sprintf("Host: %s:%s/%s", server, port, page),
@@ -168,19 +170,19 @@ func buildPageMenu(width, height int, server, port, page, msg string) *pb.PageRe
 	localPage.Links = append(localPage.Links, &pb.Link{
 		KeyStroke: "F4",
 		PageName:  "FEEDBROWSER",
-		Server:    "",
+		Server:    "MENU",
 		Port:      "0",
 	})
 	localPage.Links = append(localPage.Links, &pb.Link{
 		KeyStroke: "F5",
 		PageName:  "REFRESH",
-		Server:    "",
+		Server:    "MENU",
 		Port:      "0",
 	})
 	localPage.Links = append(localPage.Links, &pb.Link{
 		KeyStroke: "F2",
 		PageName:  "COLORDEMO",
-		Server:    "",
+		Server:    "MENU",
 		Port:      "0",
 	})
 	localPage.Links = append(localPage.Links, &pb.Link{
