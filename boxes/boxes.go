@@ -1,7 +1,10 @@
 package boxes
 
 import (
+	"bytes"
+	"strings"
 	"github.com/gdamore/tcell/v2"
+	"github.com/mitchellh/go-wordwrap"
 	"github.com/inconshreveable/log15"
 )
 
@@ -16,6 +19,8 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 	if tb.Wrap {
 		hardBreaks := false
 		charMap = wrap(*tb.Content, fillWidth, hardBreaks)
+	} else {
+		charMap = noWrap(*tb.Content)
 	}
 	for i, _ := range charMap {
 		Loggo.Debug("charmap row info",
@@ -24,6 +29,25 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 			"function", "addTextBlob",
 		)
 	}
+	// track how much content we were able to actually fit
+	invisible := len(charMap) - fillHeight
+	if invisible > 0 {
+		Loggo.Info("content exceeds divbox height",
+			"invisible", invisible,
+			"divBox.Name", bi.Name,
+		)
+		// instantiate hidden contents storage
+		bi.HiddenContents = make([][]*Pixel, bi.Width)
+		for i := range bi.HiddenContents{
+			bi.HiddenContents[i] = make([]*Pixel, invisible)
+		}
+	}
+	Loggo.Debug("fitment stats",
+		"divBox.Name", bi.Name,
+		"charMap", len(charMap),
+		"fillHeight", fillHeight,
+		"invisible-lines", invisible,
+	)
 	// log some info about colors
 	fg, _, _ := tb.Style.Decompose()
 	Loggo.Debug("have style color",
@@ -39,7 +63,8 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 	}
 	// now fill to max height
 	Loggo.Debug("populating divbox with text chars", "fillHeight", fillHeight)
-	for i := 0; i < fillHeight; i++ {
+	//for i := 0; i < fillHeight; i++ {
+	for i := 0; i < len(charMap); i++ {
 		for j, char := range charMap[i] {
 			p := Pixel{
 				C:        char,
@@ -55,7 +80,31 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 					)
 				}
 			}
-			bi.RawContents[bi.fillX1+j][bi.fillY1+i] = &p
+			// protect from index out of range if something else failed
+			if j > fillWidth-1{
+				Loggo.Error("content exceeds available width")
+				break
+			}
+			if i >= fillHeight { // store in hidden
+				bi.HiddenContents[bi.fillX1+j][i-fillHeight] = &p
+			} else {
+				bi.RawContents[bi.fillX1+j][bi.fillY1+i] = &p
+			}
+		}
+		if i >= fillHeight {
+			if len(bi.HiddenContents) > 0 {
+				Loggo.Debug("hidden stats",
+					"i", i, "fillHeight", fillHeight,
+					"invisible", invisible,
+					"len(bi.HiddenContents)", len(bi.HiddenContents[0]),
+				)
+			}
+		}
+	}
+	if invisible > 0 {
+		// will use this later to implement scrolling
+		if len(bi.HiddenContents) > 0 {
+			Loggo.Info("stored hidden content", "divBox.Name", bi.Name, "lines", len(bi.HiddenContents[0]))
 		}
 	}
 }
@@ -137,6 +186,7 @@ type DivBox struct {
 	Width       int
 	Height      int
 	RawContents [][]*Pixel
+	HiddenContents [][]*Pixel
 	// unexported fields
 	// usable fill space minus Border
 	fillX1     int
@@ -166,4 +216,60 @@ func (tb *TextBlob) MateBoxes(bxs []*DivBox) {
 			}
 		}
 	}
+}
+
+// thanks to https://stackoverflow.com/users/639133/mozey
+func splitSubN(s string, n int) []string {
+	sub := ""
+	subs := []string{}
+
+	runes := bytes.Runes([]byte(s))
+	l := len(runes)
+	for i, r := range runes {
+		sub = sub + string(r)
+		if (i+1)%n == 0 {
+			subs = append(subs, sub)
+			sub = ""
+		} else if (i + 1) == l {
+			subs = append(subs, sub)
+		}
+	}
+
+	return subs
+}
+
+func wrap(s string, fillWidth int, hardBreaks bool) map[int][]rune {
+	charMap := make(map[int][]rune)
+	var splitS []string
+	if hardBreaks {
+		splitS = splitSubN(s, fillWidth)
+	} else {
+		sn := wordwrap.WrapString(s, uint(fillWidth))
+		splitS = strings.Split(sn, "\n")
+		for i, line := range splitS {
+			if len(line) > fillWidth {
+				// do a hard break anyway and insert
+				newSlice := splitSubN(line, fillWidth)
+				toAppend := splitS[i+1:]
+				splitS = append(splitS[:i], newSlice...)
+				splitS = append(splitS, toAppend...)
+			}
+		}
+	}
+	for i, line := range splitS {
+		charMap[i] = make([]rune, len(line))
+		for j, char := range line {
+			charMap[i][j] = char
+		}
+	}
+	return charMap
+}
+
+func noWrap(s string) map[int][]rune {
+	charMap := make(map[int][]rune, 0)
+	charMap[0] = make([]rune, len(s))
+	for j, char := range s {
+		charMap[0][j] = char
+	}
+	return charMap
 }

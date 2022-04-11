@@ -106,7 +106,8 @@ func convertPageBoxes(page *pb.PageResponse) (myBoxes []*boxes.DivBox, err error
 		loggo.Debug("calling divbox.Init()")
 		bi.Init()
 		if len(bi.RawContents) > 0 {
-			loggo.Debug("divbox rawcontents first pixel", "pixel", bi.RawContents[0][0].C)
+			loggo.Debug("divbox rawcontents first pixel",
+				"pixel", bi.RawContents[0][0].C)
 		}
 	}
 	return myBoxes, err
@@ -750,6 +751,8 @@ func (b *ugglyBrowser) drawContent(label string) {
 		return
 	}
 	loggo.Debug("drawing content", "label", label)
+	// to prevent race conditions with many things creating content
+	// should replace with mutexes later
 	time.Sleep(5 * time.Millisecond)
 	content := make([]*boxes.DivBox, 0) // work with a local copy
 	loggo.Debug("drawing menu content", "len", len(b.contentMenu))
@@ -764,9 +767,6 @@ func (b *ugglyBrowser) drawContent(label string) {
 		// so as not to modify the source content (4hr bug hunt!)
 		var bj boxes.DivBox
 		bj = *bi
-		if bj.StartY < b.menuHeight { // make sure can't cover menu
-			bj.StartY = 0
-		}
 		bj.StartY += b.menuHeight
 		content = append(content, &bj)
 	}

@@ -59,3 +59,4 @@ NOTE: [Project Gemini](https://gemini.circumlunar.space/) seems to have similar 
 * ability to extract text - maybe this could be done via "write to file" but would have to consider potential security concerns.
 * more menu options such as "home page", file download location (if that becomes a feature), "help" pages, "about" with version, etc. Will probably need to have menu drop downs to save real-estate
 * add pagination for more than one page of Feed page listings
+* lock forms into divs per uggly spec
