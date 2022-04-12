@@ -122,29 +122,6 @@ func handle(err error) {
 	}
 }
 
-// splitLink takes a connection string (e.g., from the address bar textbox
-// and splits it into its component parts so it can be used to build a link struct
-// for example
-func splitLink(connString string) (host, port, page string, err error) {
-	// first add junk http so we can cheat and use net/url parse package
-	//h := fmt.Sprintf("http://%s", connString)
-	var prefix string
-	if strings.Contains(connString, "ugtps://") {
-		prefix = "ugtps://"
-	} else {
-		prefix = "ugtp://"
-	}
-	h := strings.Replace(connString, "ugtp", "http", 1)
-	u, err := url.Parse(h)
-	if err != nil {
-		return host, port, page, err
-	}
-	host = fmt.Sprintf("%s%s", prefix, u.Hostname())
-	port = u.Port()
-	page = strings.TrimPrefix(u.Path, "/")
-	return host, port, page, err
-}
-
 // handle is a lazy way of handling generic errors within the browser
 // context. Can help make more graceful exits by closing up screens,
 // connections, etc.
@@ -200,21 +177,23 @@ func detectSpecialKey(ev *tcell.EventKey) (isSpecial bool, keyName string) {
 
 func (b *ugglyBrowser) processPageForms(page *pb.PageResponse, isMenu bool) {
 	b.forms = make([]*ugform.Form, 0) // purge existing forms
-	for _, form := range page.Elements.Forms {
-		f, err := ugcon.ConvertFormLocalForm(form, b.view)
-		if err != nil {
-			loggo.Error("error processing form", "err", err.Error())
-			continue
+	if page.Elements != nil {
+		for _, form := range page.Elements.Forms {
+			f, err := ugcon.ConvertFormLocalForm(form, b.view)
+			if err != nil {
+				loggo.Error("error processing form", "err", err.Error())
+				continue
+			}
+			b.forms = append(b.forms, f)
+			if isMenu {
+				b.menuForms = make([]*ugform.Form, 0) // purge existing forms
+				b.menuForms = append(b.menuForms, f)
+			}
 		}
-		b.forms = append(b.forms, f)
-		if isMenu {
-			b.menuForms = make([]*ugform.Form, 0) // purge existing forms
-			b.menuForms = append(b.menuForms, f)
+		// always add back the menu forms
+		for _, mf := range b.menuForms {
+			b.forms = append(b.forms, mf)
 		}
-	}
-	// always add back the menu forms
-	for _, mf := range b.menuForms {
-		b.forms = append(b.forms, mf)
 	}
 }
 
@@ -228,7 +207,7 @@ func (b *ugglyBrowser) buildContentMenu(label string) {
 	}
 	localPage := buildPageMenu(
 		b.vW, b.menuHeight, b.sess.server, b.sess.port, b.sess.currPage, msg, b.sess.secure)
-	b.parseLinks(localPage, true) // retain links when injecting Menu
+	b.parseKeyStrokes(localPage, true) // retain keyStrokes when injecting Menu
 	b.processPageForms(localPage, true)
 	var err error
 	b.contentMenu, err = convertPageBoxes(localPage)
@@ -285,15 +264,14 @@ func (b *ugglyBrowser) exit(code int) {
 
 func (b *ugglyBrowser) refresh(ctx context.Context) {
 	if b.currentPageLocal == nil {
-		startLink := link{
-			server:   b.sess.server,
-			port:     b.sess.port,
-			pageName: b.sess.currPage,
+		partial := pb.Link{
+			Server:   b.sess.server,
+			Port:     b.sess.port,
+			PageName: b.sess.currPage,
 		}
-		startLink.construct()
-		startLink.deconstruct()
+		startLink, _ := b.linkFiller(&partial)
 		loggo.Info("refreshing page from server")
-		b.get2(ctx, startLink.genReq())
+		b.get2(ctx, linkRequest(startLink))
 	} else if b.currentPageLocal != nil {
 		if b.currentPageLocal.Name == "uggcli-colordemo" {
 			b.colorDemo()
@@ -309,7 +287,7 @@ func (b *ugglyBrowser) getFeed(ctx context.Context) {
 	feedErrMsg := "no server connection"
 	feedErrMsgNoFeed := "server provides no feed"
 	loggo.Info("getting feed")
-	links, err := b.sess.feedLinks()
+	keyStrokes, err := b.sess.feedKeyStrokes()
 	if err != nil {
 		if err.Error() == feedErrMsg {
 			msg := "unable to connect to server"
@@ -321,8 +299,9 @@ func (b *ugglyBrowser) getFeed(ctx context.Context) {
 		}
 	} else {
 		loggo.Info("building feed")
-		b.currentPage = buildFeedBrowser(b.vW, links)
+		b.currentPage = buildFeedBrowser(b.vW, keyStrokes)
 		b.currentPageLocal = b.currentPage
+		loggo.Debug("feed build complete", "len(page.KeyStrokes)", len(b.currentPage.KeyStrokes))
 	}
 	// regardless, redraw
 	b.handle(b.buildDraw(thisfunc))
@@ -357,22 +336,18 @@ func (b *ugglyBrowser) get2(ctx context.Context, pq *pb.PageRequest) {
 }
 
 // processAddresBar takes the address bar's form collection data and tries
-// to make it into a valid link to pass to the get() function. This is user
+// to make it into a valid Link to pass to the get() function. This is user
 // typed data so must handle many possible inputs.
-func (b *ugglyBrowser) processAddressBarInput(formContents map[string]string) (*link, error) {
-	tempLink := link{
-		class:      "page",
-		keyStroke:  "",
-		pageName:   "",
-		server:     "",
-		port:       "",
-		connString: "",
-		formName:   "",
-	}
+func (b *ugglyBrowser) processAddressBarInput(formContents map[string]string) (*pb.Link, error) {
 	loggo.Info("got address bar submission", "submission", formContents["connstring"])
-	err := tempLink.build(formContents["connstring"])
-	loggo.Info("built ugri from address bar submission", "ugri", tempLink.connString)
-	return &tempLink, err
+	link, err := linkFromString(formContents["connstring"])
+	loggo.Info("built link from address bar submission",
+		"server", link.Server,
+		"port", link.Port,
+		"pageName", link.PageName,
+		"secure", link.Secure,
+	)
+	return link, err
 }
 
 func (b *ugglyBrowser) processFormSubmission(ctx context.Context, name string) {
@@ -387,11 +362,12 @@ func (b *ugglyBrowser) processFormSubmission(ctx context.Context, name string) {
 					return
 				} else {
 					loggo.Info("dialing form submitted server",
-						"server", l.server,
-						"port", l.port,
-						"page", l.pageName,
+						"server", l.Server,
+						"port", l.Port,
+						"page", l.PageName,
+						"secure", l.Secure,
 					)
-					b.get2(ctx, l.genReq())
+					b.get2(ctx, linkRequest(l))
 				}
 			} else {
 				// find form in current Page and
@@ -401,14 +377,14 @@ func (b *ugglyBrowser) processFormSubmission(ctx context.Context, name string) {
 				li := f.SubmitAction
 				loggo.Debug("got mainbody form submission link")
 				if li, ok := li.(*pb.Link); ok {
-					l := b.convertLink(li)
+					l, _ := b.linkFiller(li)
 					loggo.Debug("type assertion succeeded, getting link",
-						"pageName", l.pageName,
-						"server", l.server,
-						"port", l.port,
+						"pageName", l.PageName,
+						"server", l.Server,
+						"port", l.Port,
 					)
 					// convert link to PageRequest
-					pr := l.genReq()
+					pr := linkRequest(l)
 					// gather data from form and build request
 					data := f.Collect()
 					pr.FormData = []*pb.FormData{}
@@ -471,44 +447,44 @@ func (b *ugglyBrowser) passForm(ctx context.Context, name string) {
 	}
 }
 
-// linkRouter determines link type (e.g., page or form) and calls the
+// keyStrokeRouter determines action type (e.g., page, form, div) and calls the
 // appropriate method
-func (b *ugglyBrowser) linkRouter(ctx context.Context, l *link) {
-	switch l.class {
-	case "page":
-		loggo.Debug("linkrouter sending get2")
-		b.get2(ctx, l.genReq())
-	case "form":
-		// warning, potentially blocking function
-		// but ctx cancel() will regain control
-		loggo.Info("detected form link, passing to passForm")
-		b.passForm(ctx, l.formName)
+func (b *ugglyBrowser) keyStrokeRouter(ctx context.Context, ks *pb.KeyStroke) {
+	switch x := ks.Action.(type) {
+		case *pb.KeyStroke_Link:
+			loggo.Debug("keyStrokeRouter sending get2")
+			b.get2(ctx, linkRequest(x.Link))
+		case *pb.KeyStroke_FormActivation:
+			// warning, potentially blocking function
+			// but ctx cancel() will regain control
+			loggo.Info("detected form activation action, passing to passForm")
+			b.passForm(ctx, x.FormActivation.FormName)
 	}
 }
 
-func (b *ugglyBrowser) handleLinks(ctx context.Context, ev *tcell.EventKey) {
+func (b *ugglyBrowser) handleKeyStrokes(ctx context.Context, ev *tcell.EventKey) {
 	if ev.Key() == tcell.KeyRune {
 		loggo.Debug("detected keypress", "key", string(ev.Rune()))
 	} else {
 		_, name := detectSpecialKey(ev)
 		loggo.Debug("detected keypress", "key", name)
 	}
-	loggo.Debug("checking activeLinks for expected keypresses", "numLinks", len(b.activeLinks))
-	for _, l := range b.activeLinks {
-		loggo.Debug("checking link", "expectedKey", l.keyStroke)
+	loggo.Debug("checking activeKeyStrokes for expected keypresses", "numLinks", len(b.activeKeyStrokes))
+	for _, ks := range b.activeKeyStrokes {
+		loggo.Debug("checking key", "expectedKey", ks.KeyStroke)
 		// see if we can detect a special
 		for k, v := range tcell.KeyNames {
-			if v == l.keyStroke {
+			if v == ks.KeyStroke {
 				if ev.Key() == k {
-					loggo.Info("sending expected key to link router")
-					b.linkRouter(ctx, l)
+					loggo.Info("sending expected key to keyStroke router")
+					b.keyStrokeRouter(ctx, ks)
 				}
 			}
 		}
 		// if not special then maybe a rune
 		if ev.Key() == tcell.KeyRune {
-			if l.keyStroke == string(ev.Rune()) {
-				b.linkRouter(ctx, l)
+			if ks.KeyStroke == string(ev.Rune()) {
+				b.keyStrokeRouter(ctx, ks)
 			}
 		}
 	}
@@ -516,7 +492,7 @@ func (b *ugglyBrowser) handleLinks(ctx context.Context, ev *tcell.EventKey) {
 
 func (b *ugglyBrowser) pollEvents(ctx context.Context) {
 	for {
-		loggo.Debug("polling and watching for links", "links", len(b.activeLinks))
+		loggo.Debug("polling and watching for keyStrokes", "keyStrokes", len(b.activeKeyStrokes))
 		ev := b.view.PollEvent()
 		switch ev := ev.(type) {
 		case *tcell.EventKey:
@@ -533,9 +509,9 @@ func (b *ugglyBrowser) pollEvents(ctx context.Context) {
 			case tcell.KeyF5:
 				b.refresh(ctx)
 			default:
-				loggo.Debug("sending to handleLinks", "numLinks", len(b.activeLinks))
-				b.handleLinks(ctx, ev)
-				// not async, poll could be blocked in handleLinks
+				loggo.Debug("sending to handleKeyStrokes", "numLinks", len(b.activeKeyStrokes))
+				b.handleKeyStrokes(ctx, ev)
+				// not async, poll could be blocked in handleKeyStrokes
 			}
 		case *tcell.EventResize:
 			b.view.Sync()
@@ -544,86 +520,88 @@ func (b *ugglyBrowser) pollEvents(ctx context.Context) {
 				b.resizeBuffer <- int(0)
 			}
 		case fakeEvent:
-			loggo.Debug("reloaded links", "numLinks", len(b.activeLinks))
+			loggo.Debug("reloaded keyStrokes", "numKeyStrokes", len(b.activeKeyStrokes))
 		}
 	}
 }
 
-type link struct {
-	class      string // one of 'page' or 'form'
-	keyStroke  string
-	pageName   string
-	server     string
-	port       string
-	connString string
-	formName   string
-	secure     bool
-}
-
-func (l *link) construct() {
-	prefix := "ugtp://"
-	if l.secure {
-		prefix = "ugtps://"
+func linkRequest(in *pb.Link) *pb.PageRequest {
+	return &pb.PageRequest{
+		Name:   in.PageName,
+		Server: in.Server,
+		Port:   in.Port,
+		Secure: in.Secure,
 	}
-	l.connString = fmt.Sprintf("%s%s:%s/%s", prefix, l.server, l.port, l.pageName)
 }
 
-func (l *link) deconstruct() (err error) {
-	if strings.Contains(l.connString, "ugtps://") {
-		l.secure = true
+// linkFiller takes a potentially partial Link and 
+// tries to fill in all of the properties using context
+// from the current server session
+func (b *ugglyBrowser) linkFiller(partial *pb.Link) (*pb.Link, error) {
+	var err error
+	var full pb.Link
+	full.PageName = partial.PageName
+	// if server didn't specify new host:port
+	// we'll assume it's the current server
+	if partial.Server == "" {
+		full.Server = b.sess.server
 	} else {
-		l.secure = false
+		full.Server = partial.Server
+	}
+	if partial.Port == "" {
+		full.Port = b.sess.port
+	} else {
+		full.Port = partial.Port
+	}
+	if partial.Secure {
+		full.Secure = true
+	}
+	if full.Server == b.sess.server && full.Port == b.sess.port {
+		full.Secure = b.sess.secure
+	}
+	return &full, err
+}
+
+// linkFromString takes a UGLI connection string (e.g., from 
+// the address bar) and tries to parse it into a Link object.
+func linkFromString(junk string) (*pb.Link, error) {
+	var full pb.Link
+	if strings.Contains(junk, "ugtps://") {
+		full.Secure = true
+	} else {
+		full.Secure = false
 	}
 	// first cheat with junk http so we can cheat and use net/url parse package
-	h := strings.Replace(l.connString, "ugtp", "http", 1)
+	h := strings.Replace(junk, "ugtp", "http", 1)
 	u, err := url.Parse(h)
 	if err != nil {
-		return err
-	}
-	l.server = u.Hostname()
-	l.port = u.Port()
-	l.pageName = strings.TrimPrefix(u.Path, "/")
-	return err
-}
-
-func (l *link) build(junk string) (err error) {
-	l.connString = junk
-	err = l.deconstruct()
-	if err != nil {
 		// try guessing some stuff
-		if !strings.Contains(l.connString, "ugtp") {
+		if !strings.Contains(junk, "ugtp") {
 			// maybe user forgot protocol
-			chunks := strings.Split(l.connString, ":")
+			chunks := strings.Split(junk, ":")
 			if len(chunks) > 1 {
-				l.server = chunks[0]
+				full.Server = chunks[0]
 				postPort := chunks[1]
 				pageChunks := strings.Split(postPort, "/")
 				if len(pageChunks) > 0 {
-					l.port = strings.TrimPrefix(pageChunks[0], ":")
-					l.pageName = pageChunks[1]
+					full.Port = strings.TrimPrefix(pageChunks[0], ":")
+					full.PageName = pageChunks[1]
 				}
 			}
-			l.construct()
-			err = nil
+			err = nil // an attempt was made
 		}
 		// TODO: try harder, it's possible we could accept
 		// all sorts of random values like "<page>" only
 		// and assume current server:port. For now we'll
 		// just pass the burden onto the user to do better
 	}
-	if l.server == "" {
+	full.Server = u.Hostname()
+	full.Port = u.Port()
+	full.PageName = strings.TrimPrefix(u.Path, "/")
+	if full.Server == "" {
 		err = errors.New("error parsing url")
 	}
-	return err
-}
-
-func (l *link) genReq() *pb.PageRequest {
-	return &pb.PageRequest{
-		Name:   l.pageName,
-		Server: l.server,
-		Port:   l.port,
-		Secure: l.secure,
-	}
+	return &full, err
 }
 
 type fakeEvent struct{}
@@ -652,80 +630,50 @@ func (b *ugglyBrowser) resizeHandler(ctx context.Context) {
 	b.resizing = false
 }
 
-func (b *ugglyBrowser) finalizeLinks() {
-	// always add menu links to list
-	for _, l := range b.menuLinks {
-		b.activeLinks = append(b.activeLinks, l)
+func (b *ugglyBrowser) finalizeKeyStrokes() {
+	// always add menu keystrokes to list
+	for _, k := range b.menuKeyStrokes {
+		b.activeKeyStrokes = append(b.activeKeyStrokes, k)
 	}
 	b.view.PostEvent(fakeEvent{})
-	for _, l := range b.activeLinks {
-		loggo.Debug("added link to activeLinks", "keyStroke", l.keyStroke, "class", l.class)
+	for _, k := range b.activeKeyStrokes {
+		loggo.Debug("added keystroke to activeKeyStrokes", "keyStroke", k.KeyStroke)
 	}
 }
 
-func (b *ugglyBrowser) convertLink(l *pb.Link) *link {
-	var tempLink link
-	tempLink.keyStroke = l.KeyStroke
-	if l.FormName == "" {
-		tempLink.class = "page"
-		// if it has a connstring then that trumps everything else
-		if l.ConnString != "" {
-			tempLink.connString = l.ConnString
-			tempLink.deconstruct() // set others
-		} else {
-			tempLink.pageName = l.PageName
-			// if server didn't specify new host:port
-			// we'll assume it's the current server
-			if l.Server == "" {
-				tempLink.server = b.sess.server
-			} else {
-				tempLink.server = l.Server
-			}
-			if l.Port == "" {
-				tempLink.port = b.sess.port
-			} else {
-				tempLink.port = l.Port
-			}
-			if l.Secure {
-				tempLink.secure = true
-			}
-			if tempLink.server == b.sess.server && tempLink.port == b.sess.port {
-				tempLink.secure = b.sess.secure
-			}
-			tempLink.construct()
-			tempLink.deconstruct()
-			loggo.Debug("convertLink built link", "connstring", tempLink.connString)
-		}
-	} else {
-		tempLink.class = "form"
-		tempLink.formName = l.FormName
-
+func (b *ugglyBrowser) parseKeyStrokes(page *pb.PageResponse, menu bool) {
+	if menu { // clear menu keyStrokes if we're rebuilding menu
+		loggo.Debug("detected menu flag, purging menuKeyStrokes")
+		b.menuKeyStrokes = []*pb.KeyStroke{}
 	}
-	return &tempLink
-}
-
-func (b *ugglyBrowser) parseLinks(page *pb.PageResponse, menu bool) {
-	if menu { // clear menu links if we're rebuilding menu
-		loggo.Debug("detected menu flag, purging menuLinks")
-		b.menuLinks = []*link{}
-	}
-	b.activeLinks = []*link{} // purge all links always
+	b.activeKeyStrokes = []*pb.KeyStroke{} // purge all keyStrokes always
 	if page == nil {
 		return
 	}
-	if page.Links == nil {
-		b.finalizeLinks() // always finalize to add menuLinks, etc
+	if page.KeyStrokes == nil {
+		b.finalizeKeyStrokes() // always finalize to add menuKeyStrokes, etc
 		return
 	}
-	for _, l := range page.Links {
-		tempLink := b.convertLink(l)
+	for _, k := range page.KeyStrokes{
+		// first we need to know what type of keystroke we have
+		switch x := k.Action.(type) {
+			case *pb.KeyStroke_Link:
+				loggo.Debug("found link action on page")
+				// fill in keyStroke properties sent over wire so we know more about them
+				x.Link, _ = b.linkFiller(x.Link)
+			case *pb.KeyStroke_FormActivation:
+				loggo.Debug("found formactivation action on page")
+			case *pb.KeyStroke_DivScroll:
+				loggo.Debug("found divscroll action on page")
+		}
 		if menu {
-			b.menuLinks = append(b.menuLinks, tempLink)
+			b.menuKeyStrokes = append(b.menuKeyStrokes, k)
 		} else {
-			b.activeLinks = append(b.activeLinks, tempLink)
+			b.activeKeyStrokes = append(b.activeKeyStrokes, k)
 		}
 	}
-	b.finalizeLinks()
+	b.finalizeKeyStrokes()
+	loggo.Debug("parseKeyStrokes complete", "len(b.activeKeyStrokes)",len(b.activeKeyStrokes))
 }
 
 // buildDraw takes all of the currently set content in the browser
@@ -736,8 +684,10 @@ func (b *ugglyBrowser) buildDraw(label string) (err error) {
 		loggo.Error("error compiling boxes", "err", err.Error())
 		return err
 	}
-	b.processPageForms(b.currentPage, false)
-	b.parseLinks(b.currentPage, false)
+	if b.currentPage != nil {
+		b.processPageForms(b.currentPage, false)
+		b.parseKeyStrokes(b.currentPage, false)
+	}
 	b.view.Clear()
 	msg := fmt.Sprintf("buildDraw-%s", label)
 	b.drawContent(msg)
@@ -810,7 +760,8 @@ type ugglyBrowser struct {
 	resizeBuffer           chan int    // buffers resize events
 	resizing               bool        // locks out other resize attempts
 	resizeDelay            time.Duration
-	activeLinks, menuLinks []*link
+	activeKeyStrokes       []*pb.KeyStroke
+	menuKeyStrokes         []*pb.KeyStroke
 	menuHeight             int
 	exitFlag               bool
 	vH                     int // view height (updates on resize event)
@@ -832,7 +783,7 @@ func newBrowser() *ugglyBrowser {
 	b.contentMenu = make([]*boxes.DivBox, 0)
 	b.contentExt = make([]*boxes.DivBox, 0)
 	b.currentPage = &pb.PageResponse{}
-	b.activeLinks = make([]*link, 0)
+	b.activeKeyStrokes = make([]*pb.KeyStroke, 0)
 	return &b
 }
 
@@ -855,15 +806,14 @@ func (b *ugglyBrowser) start(ugri string) (err error) {
 	if ugri != "" {
 		// build a local link as a bootstrap since
 		// no server can send us any links yet
-		startLink := link{}
-		startLink.build(ugri)
-		b.sess.server = startLink.server
-		b.sess.port = startLink.port
-		b.sess.secure = startLink.secure
-		b.sess.currPage = startLink.pageName
+		startLink, _ := linkFromString(ugri)
+		b.sess.server = startLink.Server
+		b.sess.port = startLink.Port
+		b.sess.secure = startLink.Secure
+		b.sess.currPage = startLink.PageName
 		// try to get initial link from a server
 		loggo.Info("getting page from server")
-		b.get2(ctx, startLink.genReq())
+		b.get2(ctx, linkRequest(startLink))
 	} else {
 		loggo.Info("no start link, starting blank")
 		go b.sendMessage("enter an address with F1", "start-blank")

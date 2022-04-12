@@ -17,7 +17,6 @@ type session struct {
 	conn            *grpc.ClientConn
 	server          string
 	port            string
-	connString      string
 	secure, secured bool
 	currPage        string
 	clientWidth     int32
@@ -28,7 +27,7 @@ func (s *session) getConnection() (err error) {
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithBlock())
 	tempConnString := fmt.Sprintf("%s:%s", s.server, s.port)
-	loggo.Info("dialing server", "connString", s.connString)
+	loggo.Info("dialing server", "connString", tempConnString)
 	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
 	if s.secure {
 		//certs, err := x509.SystemCertPool()
@@ -54,7 +53,7 @@ func (s *session) getConnection() (err error) {
 		s.secure = false
 		return err
 	}
-	loggo.Info("connection successful", "connString", s.connString)
+	loggo.Info("connection successful", "connString", tempConnString)
 	return err
 }
 
@@ -95,24 +94,18 @@ func newSession() *session {
 // having to redial.
 func (s *session) setServer(server, port string, secure bool) {
 	// borrow link methods to prevent repetition of construct logic
-	var l link
-	l.server = server
-	l.port = port
-	l.secure = secure
-	l.construct()
-	s.connString = l.connString
 	s.server = server
 	s.port = port
-	s.secure = l.secure
+	s.secure = secure
 }
 
-func (s *session) feedLinks() (links []*pb.Link, err error) {
+func (s *session) feedKeyStrokes() (keyStrokes []*pb.KeyStroke, err error) {
 	feedErrMsg := "no server connection"
 	feedErrMsgNoFeed := "server provides no feed"
 	if s.conn == nil {
 		err = errors.New(feedErrMsg)
 		loggo.Error(feedErrMsg)
-		return links, err
+		return keyStrokes, err
 	}
 	clientFeed := pb.NewFeedClient(s.conn)
 	loggo.Info("New feed client created, requesting feed from server")
@@ -131,18 +124,23 @@ func (s *session) feedLinks() (links []*pb.Link, err error) {
 			// reset err text so we can catch it
 			err = errors.New(feedErrMsgNoFeed)
 		}
-		return links, err
+		return keyStrokes, err
 	}
 	strokeMap := []string{"1", "2", "3", "4", "5", "6", "7", "8", "9",
 		"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
 		"n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"}
 	for i, page := range feed.Pages {
-		links = append(links, &pb.Link{
+		keyStrokes = append(keyStrokes, &pb.KeyStroke{
 			KeyStroke: strokeMap[i],
-			PageName:  page.Name,
-			Server:    s.server,
-			Port:      s.port,
+			Action: &pb.KeyStroke_Link{
+				Link: &pb.Link{
+					PageName:  page.Name,
+					Server:    s.server,
+					Port:      s.port,
+				},
+			},
 		})
 	}
-	return links, err
+	loggo.Debug("feedKeyStrokes returning keyStrokes", "len(keyStrokes)", len(keyStrokes))
+	return keyStrokes, err
 }

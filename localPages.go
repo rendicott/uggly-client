@@ -14,7 +14,7 @@ func shelp(fg, bg string) *pb.Style {
 	}
 }
 
-func buildFeedBrowser(width int, links []*pb.Link) *pb.PageResponse {
+func buildFeedBrowser(width int, keyStrokes []*pb.KeyStroke) *pb.PageResponse {
 	height := 36
 	localPage := pb.PageResponse{
 		Name:     "uggcli-feedbrowser",
@@ -33,10 +33,13 @@ func buildFeedBrowser(width int, links []*pb.Link) *pb.PageResponse {
 	}
 	localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes, &menuBar)
 	contentString := ""
-	for _, l := range links {
-		contentString += fmt.Sprintf("(%s) %s\n", l.KeyStroke, l.PageName)
-		// need to build
-		localPage.Links = append(localPage.Links, l)
+	for _, k := range keyStrokes {
+		switch x := k.Action.(type) {
+			case *pb.KeyStroke_Link:
+				contentString += fmt.Sprintf(
+					"(%s) %s\n", k.KeyStroke, x.Link.PageName)
+				localPage.KeyStrokes = append(localPage.KeyStrokes, k)
+		}
 	}
 	feedBrowserContent := pb.TextBlob{
 		Content:  contentString,
@@ -167,27 +170,43 @@ func buildPageMenu(width, height int, server, port, page, msg string, secure boo
 		Style:    shelp("black", "white"),
 		DivNames: []string{"uggcli-statusbar"},
 	})
-	localPage.Links = append(localPage.Links, &pb.Link{
+	localPage.KeyStrokes = append(localPage.KeyStrokes, &pb.KeyStroke{
 		KeyStroke: "F4",
-		PageName:  "FEEDBROWSER",
-		Server:    "MENU",
-		Port:      "0",
+		Action: &pb.KeyStroke_Link{
+			Link: &pb.Link{
+				PageName:  "FEEDBROWSER",
+				Server:    "MENU",
+				Port:      "0",
+			},
+		},
 	})
-	localPage.Links = append(localPage.Links, &pb.Link{
+	localPage.KeyStrokes = append(localPage.KeyStrokes, &pb.KeyStroke{
 		KeyStroke: "F5",
-		PageName:  "REFRESH",
-		Server:    "MENU",
-		Port:      "0",
+		Action: &pb.KeyStroke_Link{
+			Link: &pb.Link{
+				PageName:  "REFRESH",
+				Server:    "MENU",
+				Port:      "0",
+			},
+		},
 	})
-	localPage.Links = append(localPage.Links, &pb.Link{
+	localPage.KeyStrokes = append(localPage.KeyStrokes, &pb.KeyStroke{
 		KeyStroke: "F2",
-		PageName:  "COLORDEMO",
-		Server:    "MENU",
-		Port:      "0",
+		Action: &pb.KeyStroke_Link{
+			Link: &pb.Link{
+				PageName:  "COLORDEMO",
+				Server:    "MENU",
+				Port:      "0",
+			},
+		},
 	})
-	localPage.Links = append(localPage.Links, &pb.Link{
+	localPage.KeyStrokes = append(localPage.KeyStrokes, &pb.KeyStroke{
 		KeyStroke: "F1",
-		FormName:  "address-bar",
+		Action: &pb.KeyStroke_FormActivation{
+			FormActivation: &pb.FormActivation{
+				FormName:  "address-bar",
+			},
+		},
 	})
 	return &localPage
 }
