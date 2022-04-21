@@ -35,10 +35,10 @@ func buildFeedBrowser(width int, keyStrokes []*pb.KeyStroke) *pb.PageResponse {
 	contentString := ""
 	for _, k := range keyStrokes {
 		switch x := k.Action.(type) {
-			case *pb.KeyStroke_Link:
-				contentString += fmt.Sprintf(
-					"(%s) %s\n", k.KeyStroke, x.Link.PageName)
-				localPage.KeyStrokes = append(localPage.KeyStrokes, k)
+		case *pb.KeyStroke_Link:
+			contentString += fmt.Sprintf(
+				"(%s) %s\n", k.KeyStroke, x.Link.PageName)
+			localPage.KeyStrokes = append(localPage.KeyStrokes, k)
 		}
 	}
 	feedBrowserContent := pb.TextBlob{
@@ -174,9 +174,9 @@ func buildPageMenu(width, height int, server, port, page, msg string, secure boo
 		KeyStroke: "F4",
 		Action: &pb.KeyStroke_Link{
 			Link: &pb.Link{
-				PageName:  "FEEDBROWSER",
-				Server:    "MENU",
-				Port:      "0",
+				PageName: "FEEDBROWSER",
+				Server:   "MENU",
+				Port:     "0",
 			},
 		},
 	})
@@ -184,9 +184,9 @@ func buildPageMenu(width, height int, server, port, page, msg string, secure boo
 		KeyStroke: "F5",
 		Action: &pb.KeyStroke_Link{
 			Link: &pb.Link{
-				PageName:  "REFRESH",
-				Server:    "MENU",
-				Port:      "0",
+				PageName: "REFRESH",
+				Server:   "MENU",
+				Port:     "0",
 			},
 		},
 	})
@@ -194,9 +194,9 @@ func buildPageMenu(width, height int, server, port, page, msg string, secure boo
 		KeyStroke: "F2",
 		Action: &pb.KeyStroke_Link{
 			Link: &pb.Link{
-				PageName:  "COLORDEMO",
-				Server:    "MENU",
-				Port:      "0",
+				PageName: "COLORDEMO",
+				Server:   "MENU",
+				Port:     "0",
 			},
 		},
 	})
@@ -204,7 +204,7 @@ func buildPageMenu(width, height int, server, port, page, msg string, secure boo
 		KeyStroke: "F1",
 		Action: &pb.KeyStroke_FormActivation{
 			FormActivation: &pb.FormActivation{
-				FormName:  "address-bar",
+				FormName: "address-bar",
 			},
 		},
 	})

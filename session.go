@@ -134,9 +134,9 @@ func (s *session) feedKeyStrokes() (keyStrokes []*pb.KeyStroke, err error) {
 			KeyStroke: strokeMap[i],
 			Action: &pb.KeyStroke_Link{
 				Link: &pb.Link{
-					PageName:  page.Name,
-					Server:    s.server,
-					Port:      s.port,
+					PageName: page.Name,
+					Server:   s.server,
+					Port:     s.port,
 				},
 			},
 		})

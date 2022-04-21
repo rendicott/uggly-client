@@ -11,6 +11,7 @@ import (
 	pb "github.com/rendicott/uggly"
 	"github.com/rendicott/uggly-client/boxes"
 	"github.com/rendicott/uggly-client/ugcon"
+	"github.com/rendicott/uggsec"
 	"net/url"
 	"os"
 	"strings"
@@ -23,7 +24,21 @@ var (
 	logFile = "uggcli.log.json"
 	//logLevel   = "info"
 	logLevel = flag.String("loglevel", "info", "log level 'info' or 'debug'")
-	ugri     = flag.String("UGRI", "", "The uggly resource identifier, e.g., ugtps://myserver.domain.net:8443/home")
+	ugri     = flag.String("UGRI", "", "The uggly resource identifier, "+
+		"e.g., ugtps://myserver.domain.net:8443/home")
+	genPass = flag.Bool("vault-pass-gen", false, "On systems that do not have an OS "+
+		"keyring the vault encryption password must be stored in an ENV "+
+		"variable instead. This flag causes the browser to generate an uggsec "+
+		"vault encryption password and dump to STDOUT. Useful when used in "+
+		"conjunction with commands like `export UGGSECP=$(ugglyc -vault-pass-gen)`")
+	vaultEnvVar = flag.String("vault-password-env-var", "UGGSECP", "The ENV var that "+
+		"is used to store the vault encryption password on systems that do no support "+
+		"an OS keyring. See `vault-pass-gen` flag for generating password")
+	vaultFile = flag.String("vault-file", "cookies.json.encrypted", "filename where "+
+		"encrypted cookies are stored. Encryption key will try to be stored in OS "+
+		"keyring if available otherwise you'll have to manually generate a password "+
+		"and set an ENV var. See `vault-password-env-var` and `vault-pass-gen` "+
+		"for more details.")
 
 //	logPane  = flag.Bool("log-pane", false, "whether or not to include a client logging pane for debugging")
 )
@@ -256,9 +271,25 @@ func (b *ugglyBrowser) colorDemo() {
 func (b *ugglyBrowser) exit(code int) {
 	loggo.Info("caught exit interrupt", "code", code)
 	b.exitFlag = true // in case other go routines are watching
+	err := b.storeCookies()
+	if err != nil {
+		loggo.Error("error storing cookies on close", "error", err.Error())
+		if strings.Contains(err.Error(), "no password found") {
+			b.exitMessages = append(
+				b.exitMessages,
+				"Warning: Cookie storage failed on close due to absence of keyring"+
+					" or missing encryption password. Cookies will be ephemeral until "+
+					" this is fixed. To fix this, run the browser with the "+
+					"`--help` parameter and generate a new password and store it"+
+					" in the desired ENV var")
+		}
+	}
 	close(b.interrupt)
 	close(b.messageBuffer)
 	b.view.Fini()
+	for _, message := range b.exitMessages {
+		fmt.Println(message)
+	}
 	os.Exit(code)
 }
 
@@ -313,8 +344,9 @@ func (b *ugglyBrowser) get2(ctx context.Context, pq *pb.PageRequest) {
 	pq.ClientWidth = int32(b.vW)
 	pq.ClientHeight = int32(b.vH)
 	dest := fmt.Sprintf("%s:%s", pq.Server, pq.Port)
+	ctxc, pqc := b.addCookies(ctx, pq)
 	b.sendMessage(fmt.Sprintf("dialing server '%s'...", dest), "get2-preDial")
-	b.currentPage, err = b.sess.get2(ctx, pq)
+	b.currentPage, err = b.sess.get2(ctxc, pqc)
 	if err != nil {
 		if err.Error() == "context deadline exceeded" {
 			b.sendMessage(
@@ -322,7 +354,7 @@ func (b *ugglyBrowser) get2(ctx context.Context, pq *pb.PageRequest) {
 			return
 		}
 		if err.Error() == "error getting page from server" {
-			msg := fmt.Sprintf("error getting page '%s' from server", pq.Name)
+			msg := fmt.Sprintf("error getting page '%s' from server", pqc.Name)
 			b.sendMessage(msg, "get2-notfound")
 			loggo.Error(msg)
 		} else {
@@ -331,12 +363,17 @@ func (b *ugglyBrowser) get2(ctx context.Context, pq *pb.PageRequest) {
 	} else {
 		b.sendMessage("connected!", "get2-success")
 		b.currentPageLocal = nil // so refresh knows to get external
+		// process cookies
+		for _, setCookie := range b.currentPage.SetCookies {
+			loggo.Debug("Got cookie from server", "key", setCookie.Key)
+		}
+		b.setCookies(b.currentPage)
 		b.handle(b.buildDraw("get2"))
 	}
 }
 
 // processAddresBar takes the address bar's form collection data and tries
-// to make it into a valid Link to pass to the get() function. This is user
+// to make it into a valid Link to pass to the get2() function. This is user
 // typed data so must handle many possible inputs.
 func (b *ugglyBrowser) processAddressBarInput(formContents map[string]string) (*pb.Link, error) {
 	loggo.Info("got address bar submission", "submission", formContents["connstring"])
@@ -451,14 +488,14 @@ func (b *ugglyBrowser) passForm(ctx context.Context, name string) {
 // appropriate method
 func (b *ugglyBrowser) keyStrokeRouter(ctx context.Context, ks *pb.KeyStroke) {
 	switch x := ks.Action.(type) {
-		case *pb.KeyStroke_Link:
-			loggo.Debug("keyStrokeRouter sending get2")
-			b.get2(ctx, linkRequest(x.Link))
-		case *pb.KeyStroke_FormActivation:
-			// warning, potentially blocking function
-			// but ctx cancel() will regain control
-			loggo.Info("detected form activation action, passing to passForm")
-			b.passForm(ctx, x.FormActivation.FormName)
+	case *pb.KeyStroke_Link:
+		loggo.Debug("keyStrokeRouter sending get2")
+		b.get2(ctx, linkRequest(x.Link))
+	case *pb.KeyStroke_FormActivation:
+		// warning, potentially blocking function
+		// but ctx cancel() will regain control
+		loggo.Info("detected form activation action, passing to passForm")
+		b.passForm(ctx, x.FormActivation.FormName)
 	}
 }
 
@@ -534,7 +571,7 @@ func linkRequest(in *pb.Link) *pb.PageRequest {
 	}
 }
 
-// linkFiller takes a potentially partial Link and 
+// linkFiller takes a potentially partial Link and
 // tries to fill in all of the properties using context
 // from the current server session
 func (b *ugglyBrowser) linkFiller(partial *pb.Link) (*pb.Link, error) {
@@ -562,7 +599,7 @@ func (b *ugglyBrowser) linkFiller(partial *pb.Link) (*pb.Link, error) {
 	return &full, err
 }
 
-// linkFromString takes a UGLI connection string (e.g., from 
+// linkFromString takes a UGLI connection string (e.g., from
 // the address bar) and tries to parse it into a Link object.
 func linkFromString(junk string) (*pb.Link, error) {
 	var full pb.Link
@@ -654,17 +691,17 @@ func (b *ugglyBrowser) parseKeyStrokes(page *pb.PageResponse, menu bool) {
 		b.finalizeKeyStrokes() // always finalize to add menuKeyStrokes, etc
 		return
 	}
-	for _, k := range page.KeyStrokes{
+	for _, k := range page.KeyStrokes {
 		// first we need to know what type of keystroke we have
 		switch x := k.Action.(type) {
-			case *pb.KeyStroke_Link:
-				loggo.Debug("found link action on page")
-				// fill in keyStroke properties sent over wire so we know more about them
-				x.Link, _ = b.linkFiller(x.Link)
-			case *pb.KeyStroke_FormActivation:
-				loggo.Debug("found formactivation action on page")
-			case *pb.KeyStroke_DivScroll:
-				loggo.Debug("found divscroll action on page")
+		case *pb.KeyStroke_Link:
+			loggo.Debug("found link action on page")
+			// fill in keyStroke properties sent over wire so we know more about them
+			x.Link, _ = b.linkFiller(x.Link)
+		case *pb.KeyStroke_FormActivation:
+			loggo.Debug("found formactivation action on page")
+		case *pb.KeyStroke_DivScroll:
+			loggo.Debug("found divscroll action on page")
 		}
 		if menu {
 			b.menuKeyStrokes = append(b.menuKeyStrokes, k)
@@ -673,7 +710,7 @@ func (b *ugglyBrowser) parseKeyStrokes(page *pb.PageResponse, menu bool) {
 		}
 	}
 	b.finalizeKeyStrokes()
-	loggo.Debug("parseKeyStrokes complete", "len(b.activeKeyStrokes)",len(b.activeKeyStrokes))
+	loggo.Debug("parseKeyStrokes complete", "len(b.activeKeyStrokes)", len(b.activeKeyStrokes))
 }
 
 // buildDraw takes all of the currently set content in the browser
@@ -746,26 +783,36 @@ func (b *ugglyBrowser) drawContent(label string) {
 }
 
 type ugglyBrowser struct {
-	view                   tcell.Screen
-	contentMenu            []*boxes.DivBox
-	forms                  []*ugform.Form  // stores forms known at this time
-	menuForms              []*ugform.Form  // stores menuforms known at this time
-	contentExt             []*boxes.DivBox // e.g., non-menu content
-	currentPage            *pb.PageResponse
-	currentPageLocal       *pb.PageResponse // so we don't get from external
-	interrupt              chan struct{}
-	sess                   *session    // gRPC stuff buried in session.go
-	messages               []*string   // messages accessed from here
-	messageBuffer          chan string // buffer mostly used as trigger/stack
-	resizeBuffer           chan int    // buffers resize events
-	resizing               bool        // locks out other resize attempts
-	resizeDelay            time.Duration
-	activeKeyStrokes       []*pb.KeyStroke
-	menuKeyStrokes         []*pb.KeyStroke
-	menuHeight             int
-	exitFlag               bool
-	vH                     int // view height (updates on resize event)
-	vW                     int // view width (updates on resize event)
+	view             tcell.Screen
+	contentMenu      []*boxes.DivBox
+	forms            []*ugform.Form  // stores forms known at this time
+	menuForms        []*ugform.Form  // stores menuforms known at this time
+	contentExt       []*boxes.DivBox // e.g., non-menu content
+	currentPage      *pb.PageResponse
+	currentPageLocal *pb.PageResponse // so we don't get from external
+	interrupt        chan struct{}
+	sess             *session    // gRPC stuff buried in session.go
+	messages         []*string   // messages accessed from here
+	messageBuffer    chan string // buffer mostly used as trigger/stack
+	resizeBuffer     chan int    // buffers resize events
+	resizing         bool        // locks out other resize attempts
+	resizeDelay      time.Duration
+	activeKeyStrokes []*pb.KeyStroke
+	menuKeyStrokes   []*pb.KeyStroke
+	cookies          map[string][]*pb.Cookie // all cookies stored for each server string
+	menuHeight       int
+	exitFlag         bool
+	vH               int      // view height (updates on resize event)
+	vW               int      // view width (updates on resize event)
+	exitMessages     []string // messages to print on exit since stdout no worky during
+	settings         *ugglyBrowserSettings
+	vaultPassEnvVar  string
+}
+
+type ugglyBrowserSettings struct {
+	// the ENV var that stores the vault encryption password
+	VaultPassEnvVar string `yaml:"vaultPassEnvVar"`
+	VaultFile       string `yaml:"vaultFile"`
 }
 
 // newBrowser initializes all of the browser's properties
@@ -784,6 +831,8 @@ func newBrowser() *ugglyBrowser {
 	b.contentExt = make([]*boxes.DivBox, 0)
 	b.currentPage = &pb.PageResponse{}
 	b.activeKeyStrokes = make([]*pb.KeyStroke, 0)
+	b.cookies = make(map[string][]*pb.Cookie, 0)
+	b.exitMessages = make([]string, 0)
 	return &b
 }
 
@@ -793,6 +842,12 @@ func (b *ugglyBrowser) start(ugri string) (err error) {
 	b.view, err = initScreen()
 	if err != nil {
 		return err
+	}
+	err = b.loadCookies()
+	if err != nil {
+		loggo.Error("error loading cookies from file", "error", err.Error())
+		// not fatal so we'll continue
+		err = nil
 	}
 	b.vW, b.vH = b.view.Size()
 	go b.startupRefreshDelay()
@@ -861,7 +916,17 @@ func main() {
 	boxes.Loggo = loggo
 	ugform.Loggo = loggo
 	ugcon.Loggo = loggo
+	uggsec.Loggo = loggo
+
+	if *genPass {
+		fmt.Println(uggsec.NewVaultPassword())
+		os.Exit(0)
+	}
 	brow = newBrowser()
+	brow.settings = &ugglyBrowserSettings{
+		VaultPassEnvVar: *vaultEnvVar,
+		VaultFile:       *vaultFile,
+	}
 	brow.sess = newSession()
 	// start the monostruct
 	err := brow.start(*ugri)

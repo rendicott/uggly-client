@@ -103,6 +103,7 @@ func ConvertFormLocalForm (uf *uggly.Form, s tcell.Screen) (*ugform.Form, error)
 			StyleText: *setStyle(tb.StyleText.Fg, tb.StyleText.Bg),
 			StyleDescription: *setStyle(tb.StyleDescription.Fg, tb.StyleDescription.Bg),
 			ShowDescription: tb.ShowDescription,
+			Password: tb.Password,
 		})
 	}
 	return u, err
