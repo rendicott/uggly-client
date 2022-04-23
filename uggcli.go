@@ -21,8 +21,7 @@ import (
 var version string
 
 var (
-	logFile = "uggcli.log.json"
-	//logLevel   = "info"
+	logFile  = "uggcli.log.json"
 	logLevel = flag.String("loglevel", "info", "log level 'info' or 'debug'")
 	ugri     = flag.String("UGRI", "", "The uggly resource identifier, "+
 		"e.g., ugtps://myserver.domain.net:8443/home")
@@ -39,8 +38,6 @@ var (
 		"keyring if available otherwise you'll have to manually generate a password "+
 		"and set an ENV var. See `vault-password-env-var` and `vault-pass-gen` "+
 		"for more details.")
-
-//	logPane  = flag.Bool("log-pane", false, "whether or not to include a client logging pane for debugging")
 )
 
 // loggo is the global logger
@@ -199,6 +196,24 @@ func (b *ugglyBrowser) processPageForms(page *pb.PageResponse, isMenu bool) {
 				loggo.Error("error processing form", "err", err.Error())
 				continue
 			}
+			// now we have it in ugform.Form format so
+			// we have the form.ShiftXY method available so we can
+			// shove the form into DivBox like the docs say we do
+			// this prevents them from covering the menu too
+			// if people tell them to start at positionY = 0
+			for _, div := range page.DivBoxes.Boxes {
+				if form.DivName == div.Name {
+					loggo.Debug("shifting form to start in DivBox",
+						"formName", form.Name,
+						"divName", div.Name)
+					sX := int(div.StartX)
+					sY := int(div.StartY + div.BorderW)
+					if !isMenu {
+						sY += b.menuHeight
+					}
+					f.ShiftXY(sX, sY)
+				}
+			}
 			b.forms = append(b.forms, f)
 			if isMenu {
 				b.menuForms = make([]*ugform.Form, 0) // purge existing forms
@@ -235,6 +250,10 @@ func (b *ugglyBrowser) buildContentMenu(label string) {
 	case <-b.interrupt:
 		return
 	default:
+		if b.currentPage != nil {
+			b.processPageForms(b.currentPage, false)
+			b.parseKeyStrokes(b.currentPage, false)
+		}
 		b.drawContent("menu")
 	}
 }
@@ -299,6 +318,7 @@ func (b *ugglyBrowser) refresh(ctx context.Context) {
 			Server:   b.sess.server,
 			Port:     b.sess.port,
 			PageName: b.sess.currPage,
+			Stream:   b.sess.stream,
 		}
 		startLink, _ := b.linkFiller(&partial)
 		loggo.Info("refreshing page from server")
@@ -338,29 +358,116 @@ func (b *ugglyBrowser) getFeed(ctx context.Context) {
 	b.handle(b.buildDraw(thisfunc))
 }
 
+func (b *ugglyBrowser) streamHandler(stream chan *pb.PageResponse) {
+	var ok bool
+	for {
+		select {
+		case b.currentPage, ok = <-stream:
+			if !ok {
+				stream = nil
+			} else {
+				loggo.Info("got page from stream, drawing...")
+				b.setCookies(b.currentPage)
+				b.handle(b.buildDraw("get2"))
+				//time.Sleep(1*time.Millisecond)
+				if b.currentPage.StreamDelayMs == 0 {
+					time.Sleep(500 * time.Millisecond)
+				} else {
+					s := time.Duration(b.currentPage.StreamDelayMs)
+					time.Sleep(s * time.Millisecond)
+				}
+			}
+		}
+		if stream == nil {
+			//b.sendMessage("stream ended", "streamWatcher")
+			return
+		}
+	}
+}
+
+func (b *ugglyBrowser) cexVendor() {
+	ctx, cancel := context.WithCancel(context.Background())
+	for {
+		select {
+		case msg := <-b.cexCancel:
+			loggo.Info("caught cancel", "cancel-msg", msg)
+			loggo.Info("calling cancel in watcher")
+			b.sendMessage("cancelling connection", "cexVendor-cancel")
+			cancel()
+			// reset context
+			ctx, cancel = context.WithCancel(context.Background())
+		case job := <-b.cexJobs:
+			loggo.Info("got request for new context")
+			switch job {
+			case "page":
+				ctx, cancel = context.WithTimeout(
+					context.Background(), 5*time.Second)
+				b.cexOut <- ctx
+				loggo.Info("sent timeout ctx to requestor")
+			case "stream":
+				ctx, cancel = context.WithCancel(context.Background())
+				b.cexOut <- ctx
+				loggo.Info("sent cancel ctx to requestor")
+			case "form":
+				ctx = context.Background()
+				b.cexOut <- ctx
+				loggo.Info("sent blank ctx to requestor")
+			default:
+				loggo.Info("sent current ctx to requestor")
+				b.cexOut <- ctx
+			}
+		}
+	}
+}
+
 func (b *ugglyBrowser) get2(ctx context.Context, pq *pb.PageRequest) {
 	var err error
-	ctx, _ = context.WithTimeout(context.Background(), 5*time.Second)
 	pq.ClientWidth = int32(b.vW)
 	pq.ClientHeight = int32(b.vH)
 	dest := fmt.Sprintf("%s:%s", pq.Server, pq.Port)
-	ctxc, pqc := b.addCookies(ctx, pq)
 	b.sendMessage(fmt.Sprintf("dialing server '%s'...", dest), "get2-preDial")
-	b.currentPage, err = b.sess.get2(ctxc, pqc)
+	if pq.Stream {
+		loggo.Info("connecting to stream")
+		stream := make(chan *pb.PageResponse)
+		go b.streamHandler(stream)
+		loggo.Info("requesting cancellable context from cexVendor")
+		b.cexJobs <- "stream"
+		ctxc, pqc := b.addCookies(<-b.cexOut, pq)
+		b.sendMessage("connected to stream!", "get2-stream-success")
+		b.currentPageLocal = nil // so refresh knows to get external
+		err = b.sess.getStream(ctxc, pqc, stream)
+		b.sendMessage("connected!", "get2-success")
+		if err != nil {
+			loggo.Error("error getting stream", "error", err.Error())
+			b.sendMessage("error getting stream", "get2-stream-fail")
+		}
+	} else {
+		loggo.Info("requesting timeout context from cexVendor")
+		b.cexJobs <- "page"
+		ctxc, pqc := b.addCookies(<-b.cexOut, pq)
+		b.currentPage, err = b.sess.get2(ctxc, pqc)
+	}
 	if err != nil {
 		if err.Error() == "context deadline exceeded" {
 			b.sendMessage(
 				fmt.Sprintf("connection timeout to '%s'", dest), "get2-timeout")
 			return
-		}
-		if err.Error() == "error getting page from server" {
-			msg := fmt.Sprintf("error getting page '%s' from server", pqc.Name)
+		} else if err.Error() == "error getting page from server" {
+			msg := fmt.Sprintf("error getting page '%s' from server", pq.Name)
 			b.sendMessage(msg, "get2-notfound")
+			loggo.Error(msg)
+		} else if strings.Contains(err.Error(), "connection refused") {
+			msg := fmt.Sprintf("connection refused")
+			b.sendMessage(msg, "get2-refused")
+			loggo.Error(msg)
+		} else if strings.Contains(err.Error(), "context cancel") { // wow, spelling
+			msg := fmt.Sprintf("connection cancelled")
+			b.sendMessage(msg, "get2-cancelled")
 			loggo.Error(msg)
 		} else {
 			b.handle(err)
 		}
-	} else {
+	} else if !pq.Stream {
 		b.sendMessage("connected!", "get2-success")
 		b.currentPageLocal = nil // so refresh knows to get external
 		// process cookies
@@ -378,6 +485,11 @@ func (b *ugglyBrowser) get2(ctx context.Context, pq *pb.PageRequest) {
 func (b *ugglyBrowser) processAddressBarInput(formContents map[string]string) (*pb.Link, error) {
 	loggo.Info("got address bar submission", "submission", formContents["connstring"])
 	link, err := linkFromString(formContents["connstring"])
+	if strings.Contains(link.PageName, "->") {
+		loggo.Info("detected '->' in form submitted link, converting to stream")
+		link.PageName = strings.Replace(link.PageName, "->", "", -1)
+		link.Stream = true
+	}
 	loggo.Info("built link from address bar submission",
 		"server", link.Server,
 		"port", link.Port,
@@ -495,6 +607,9 @@ func (b *ugglyBrowser) keyStrokeRouter(ctx context.Context, ks *pb.KeyStroke) {
 		// warning, potentially blocking function
 		// but ctx cancel() will regain control
 		loggo.Info("detected form activation action, passing to passForm")
+		loggo.Info("getting new context without cancel or timeout")
+		b.cexJobs <- "form"
+		ctx = <-b.cexOut
 		b.passForm(ctx, x.FormActivation.FormName)
 	}
 }
@@ -535,15 +650,20 @@ func (b *ugglyBrowser) pollEvents(ctx context.Context) {
 		case *tcell.EventKey:
 			switch ev.Key() {
 			case tcell.KeyF12:
+				b.cexCancel <- "user-cancel"
 				b.exit(0)
 				return
 			case tcell.KeyCtrlL:
-				b.view.Sync()
+				loggo.Info("kill context")
+				b.cexCancel <- "user-cancel"
 			case tcell.KeyF4:
+				b.cexCancel <- "user-cancel"
 				b.getFeed(ctx)
 			case tcell.KeyF2:
+				b.cexCancel <- "user-cancel"
 				b.colorDemo()
 			case tcell.KeyF5:
+				b.cexCancel <- "user-cancel"
 				b.refresh(ctx)
 			default:
 				loggo.Debug("sending to handleKeyStrokes", "numLinks", len(b.activeKeyStrokes))
@@ -568,6 +688,7 @@ func linkRequest(in *pb.Link) *pb.PageRequest {
 		Server: in.Server,
 		Port:   in.Port,
 		Secure: in.Secure,
+		Stream: in.Stream,
 	}
 }
 
@@ -596,6 +717,7 @@ func (b *ugglyBrowser) linkFiller(partial *pb.Link) (*pb.Link, error) {
 	if full.Server == b.sess.server && full.Port == b.sess.port {
 		full.Secure = b.sess.secure
 	}
+	full.Stream = partial.Stream
 	return &full, err
 }
 
@@ -725,6 +847,7 @@ func (b *ugglyBrowser) buildDraw(label string) (err error) {
 		b.processPageForms(b.currentPage, false)
 		b.parseKeyStrokes(b.currentPage, false)
 	}
+	loggo.Debug("clearing screen contents")
 	b.view.Clear()
 	msg := fmt.Sprintf("buildDraw-%s", label)
 	b.drawContent(msg)
@@ -807,6 +930,9 @@ type ugglyBrowser struct {
 	exitMessages     []string // messages to print on exit since stdout no worky during
 	settings         *ugglyBrowserSettings
 	vaultPassEnvVar  string
+	// define channels for context vendor
+	cexCancel, cexJobs chan string
+	cexOut             chan context.Context
 }
 
 type ugglyBrowserSettings struct {
@@ -833,12 +959,14 @@ func newBrowser() *ugglyBrowser {
 	b.activeKeyStrokes = make([]*pb.KeyStroke, 0)
 	b.cookies = make(map[string][]*pb.Cookie, 0)
 	b.exitMessages = make([]string, 0)
+	b.cexJobs = make(chan string)
+	b.cexCancel = make(chan string)
+	b.cexOut = make(chan context.Context)
 	return &b
 }
 
 // start initializes
 func (b *ugglyBrowser) start(ugri string) (err error) {
-	ctx, _ := context.WithCancel(context.Background())
 	b.view, err = initScreen()
 	if err != nil {
 		return err
@@ -851,6 +979,10 @@ func (b *ugglyBrowser) start(ugri string) (err error) {
 	}
 	b.vW, b.vH = b.view.Size()
 	go b.startupRefreshDelay()
+	loggo.Info("starting context vendor goroutine")
+	go b.cexVendor()
+	b.cexJobs <- "page"
+	ctx := <-b.cexOut
 	// start main event poller for keyboard activity
 	go b.pollEvents(ctx)
 	// start menu watcher which looks for messages to be
@@ -866,6 +998,7 @@ func (b *ugglyBrowser) start(ugri string) (err error) {
 		b.sess.port = startLink.Port
 		b.sess.secure = startLink.Secure
 		b.sess.currPage = startLink.PageName
+		b.sess.stream = startLink.Stream
 		// try to get initial link from a server
 		loggo.Info("getting page from server")
 		b.get2(ctx, linkRequest(startLink))

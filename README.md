@@ -31,6 +31,7 @@ NOTE: [Project Gemini](https://gemini.circumlunar.space/) seems to have similar 
   * [ugdyn](https://github.com/rendicott/ugdyn) - is an example of dynamically generated content and is what is showing the black/green boxes page in the gif and the Harry Potter API navigator. 
 
 ## Client Features (user'ish)
+* supports TLS over gRPC which means that communication to servers that create their listeners with an SSL cert are secure. This is indicated client side via the "ugtps://" syntax and a green colored address bar. All insecure connections are represented with the "ugtp://" syntax and a red colored address-bar.
 * Client doesn't have the ability to do anything to your machine except manipulate the terminal's screen. This limits some features (e.g., no file access) but also means no exploits. 
 * Auto resizing of content and screen size is sent to server. Whether or not server wants to do anything about it is up to the server. 
 * Variable link/keystrokes based on what the server sends. Local client upper menu bar always trumps whatever the server sends.
@@ -40,6 +41,8 @@ NOTE: [Project Gemini](https://gemini.circumlunar.space/) seems to have similar 
 * A color demo that helps understand color names and what they look like for a given terminal. Mostly useful for server authors to select styling decisions. 
 * Server authors can host a "feed" which is like a server index that can be accessed via Menu shortcut. Sometimes this is helpful for users to get their bearings on available server content. Lazy server authors could use this too if they don't want to draw fancy nav menus. 
 * ability to immediately connect to a server, port, page via command parameters
+* Cookie support loosely based on HTTP browser cookies. For example, a sessionID cookie provided by a server with an Expiration attribute set will store to disk on close. All cookies without Expiration set are considered session cookies and are purged on close. 
+* Secure cookie storage for non-session cookies on disk on client close. This is stored in an encrypted file with the encryption key either stored in OS keyring or an ENV var that the user specifies. 
 
 ## Client Notes (developer'ish)
 * Common logging across all sub-packages via [log15](https://github.com/inconshreveable/log15)
@@ -49,9 +52,6 @@ NOTE: [Project Gemini](https://gemini.circumlunar.space/) seems to have similar 
 * all local content (e.g., menu bar and color demo) is created using same proto structs that servers would use. The only difference is that the client can control when this content is generated and how it gets prioritized. 
 
 # TODO:
-* Add cookie support so custom sessions can be supported.
-* ~Add TLS to the gRPC connection. Figure out how to manage certs sanely.~ 
-  * Added this but need to figure out how to get better error messages from gRPC. When all the cert stars are not aligned it just times out, e.g., you get a timeout when server doesn't provide chain. 
 * Possibly add the concept of Page streams to support animation or gaming. Should be trivial with gRPC. Would probably add a Page streamer to proto with a time frequency between pages dictated by server with a min/max specified by client. 
 * support more of the underlying tcell screen features such as monochrome detection
 * support sounds?
@@ -59,4 +59,10 @@ NOTE: [Project Gemini](https://gemini.circumlunar.space/) seems to have similar 
 * ability to extract text - maybe this could be done via "write to file" but would have to consider potential security concerns.
 * more menu options such as "home page", file download location (if that becomes a feature), "help" pages, "about" with version, etc. Will probably need to have menu drop downs to save real-estate
 * add pagination for more than one page of Feed page listings
-* lock forms into divs per uggly spec
+
+# TODONES
+* ~lock forms into divs per uggly spec~
+  * done
+* ~Add cookie support so custom sessions can be supported.~
+* ~Add TLS to the gRPC connection. Figure out how to manage certs sanely.~ 
+  * Added this but need to figure out how to get better error messages from gRPC. When all the cert stars are not aligned it just times out, e.g., you get a timeout when server doesn't provide chain. 

@@ -143,7 +143,7 @@ func buildPageMenu(width, height int, server, port, page, msg string, secure boo
 				"%s%s:%s/%s", addressPrefix, server, port, page),
 			Description:      "Host: (F1)",
 			PositionX:        int32(14),
-			PositionY:        int32(1),
+			PositionY:        int32(0),
 			Height:           int32(1),
 			Width:            int32(width / 2),
 			StyleCursor:      shelp("black", "olive"),
