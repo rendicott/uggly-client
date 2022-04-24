@@ -79,6 +79,7 @@ func setLogger(daemonFlag bool, logFileS, loglevel string) {
 // convertPageBoxes converts an uggly.PageResponse into a boxes.DivBox format
 // which can then be set as content to be drawn later
 func convertPageBoxes(page *pb.PageResponse) (myBoxes []*boxes.DivBox, err error) {
+    debugTags := []string{"transform","draw"}
 	if page == nil {
 		return myBoxes, err
 	}
@@ -103,23 +104,27 @@ func convertPageBoxes(page *pb.PageResponse) (myBoxes []*boxes.DivBox, err error
 		if err != nil {
 			return myBoxes, err
 		}
-		loggo.Debug("build boxes.TextBlob", "tb.Content", tb.Content)
+		loggo.Debug("build boxes.TextBlob",
+            "tb.Content", tb.Content,
+            "tags", debugTags)
 		fgcolor, _, _ := tb.Style.Decompose()
 		tcolor := fgcolor.TrueColor()
 		loggo.Debug("style after conversion",
-			"fgcolor", tcolor, "page-name", page.Name,
-		)
+			"fgcolor", tcolor, "page-name", page.Name)
 		if page.Name == "uggcli-menu" {
-			loggo.Debug("got menu textblob", "content", ele.Content)
+			loggo.Debug("got menu textblob", "content", ele.Content,
+            "tags", debugTags)
 		}
 		tb.MateBoxes(myBoxes)
 	}
 	for _, bi := range myBoxes {
-		loggo.Debug("calling divbox.Init()")
+		loggo.Debug("calling divbox.Init()",
+            "tags", debugTags)
 		bi.Init()
 		if len(bi.RawContents) > 0 {
 			loggo.Debug("divbox rawcontents first pixel",
-				"pixel", bi.RawContents[0][0].C)
+				"pixel", bi.RawContents[0][0].C,
+                "tags", debugTags)
 		}
 	}
 	return myBoxes, err
@@ -175,16 +180,20 @@ func detectSpecialKey(ev *tcell.EventKey) (isSpecial bool, keyName string) {
 }
 
 func (b *ugglyBrowser) processPageForms(page *pb.PageResponse, isMenu bool, label string) {
-    loggo.Debug("starting processPageForms", "label", label, "startingForms", len(b.forms))
-    loggo.Debug("purging all forms")
+    debugTags := []string{"form","menu"}
+    loggo.Debug("starting processPageForms, purging all fors",
+        "label", label, "startingForms", len(b.forms),
+        "tags", debugTags)
 	b.forms = make([]*ugform.Form, 0) // purge existing forms
     if isMenu {
-        loggo.Debug("job flagged as isMenu so purging menu forms")
+        loggo.Debug("job flagged as isMenu so purging menu forms",
+            "tags", debugTags)
         b.menuForms = make([]*ugform.Form, 0) // purge existing forms
     }
 	if page.Elements != nil {
 		for _, form := range page.Elements.Forms {
-            loggo.Debug("convering page form to ugform")
+            loggo.Debug("convering page form to ugform",
+                "tags", debugTags)
 			f, err := ugcon.ConvertFormLocalForm(form, b.view)
 			if err != nil {
 				loggo.Error("error processing form", "err", err.Error(), "label", label)
@@ -195,13 +204,15 @@ func (b *ugglyBrowser) processPageForms(page *pb.PageResponse, isMenu bool, labe
 			// shove the form into DivBox like the docs say we do
 			// this prevents them from covering the menu too
 			// if people tell them to start at positionY = 0
-            loggo.Debug("shifting forms to be relative to DivBox")
+            loggo.Debug("shifting forms to be relative to DivBox",
+                "tags", debugTags)
 			for _, div := range page.DivBoxes.Boxes {
 				if form.DivName == div.Name {
 					loggo.Debug("shifting form to start in DivBox",
 						"formName", form.Name,
 						"divName", div.Name,
-                        "label", label)
+                        "label", label,
+                        "tags", debugTags)
 					sX := int(div.StartX)
 					sY := int(div.StartY + div.BorderW)
 					if !isMenu {
@@ -213,24 +224,30 @@ func (b *ugglyBrowser) processPageForms(page *pb.PageResponse, isMenu bool, labe
 			if isMenu {
 				b.menuForms = append(b.menuForms, f)
 			} else {
-                loggo.Debug("adding page form to b.forms", "beforeAdd", len(b.forms))
+                loggo.Debug("adding page form to b.forms",
+                    "beforeAdd", len(b.forms),
+                    "tags", debugTags)
                 b.forms = append(b.forms, f)
             }
 		}
 	}
     // always add back the menu forms
-    loggo.Debug("before adding back menu forms", "beforeAddMenuForms", len(b.forms), "numMenuForms", len(b.menuForms))
+    loggo.Debug("before adding back menu forms",
+           "beforeAddMenuForms", len(b.forms), "numMenuForms", len(b.menuForms),
+            "tags", debugTags)
     for _, mf := range b.menuForms {
         b.forms = append(b.forms, mf)
     }
     loggo.Debug("have final forms",
         "forms", len(b.forms),
         "menuForms", len(b.menuForms),
-        "label", label)
+        "label", label,
+        "tags", debugTags)
 }
 
 func (b *ugglyBrowser) buildContentMenu(label string) {
 	// makes boxes for the uggcli menu top bar
+    debugTags := []string{"menu","form")
     label = fmt.Sprintf("%s-buildContentMenu", label)
 	var msg string
 	if len(b.messages) > 0 {
@@ -241,11 +258,17 @@ func (b *ugglyBrowser) buildContentMenu(label string) {
 	localPage := buildPageMenu(
 		b.vW, b.menuHeight, b.sess.server, b.sess.port, b.sess.currPage, msg, b.sess.secure)
 	b.parseKeyStrokes(localPage, true) // retain keyStrokes when injecting Menu
-    loggo.Debug("after menu build have forms", "pageForms", len(localPage.Elements.Forms))
+    loggo.Debug("after menu build have forms",
+        "pageForms", len(localPage.Elements.Forms),
+        "tags", debugTags)
 	b.processPageForms(localPage, true, label)
-    loggo.Debug("after processPageForms have browser forms", "forms", len(b.forms), "menuForms", len(b.menuForms))
+    loggo.Debug("after processPageForms have browser forms",
+        "forms", len(b.forms), "menuForms", len(b.menuForms),
+        "tags", debugTags)
     for _, form := range(b.forms) {
-        loggo.Debug("form details", "formName", form.Name)
+        loggo.Debug("form details",
+            "formName", form.Name,
+            "tags", debugTags)
     }
 	var err error
 	b.contentMenu, err = convertPageBoxes(localPage)
@@ -260,7 +283,8 @@ func (b *ugglyBrowser) buildContentMenu(label string) {
 	default:
 		if b.currentPage != nil {
             loggo.Debug("menu build but current page not nil so processing forms and keystrokes with menu=false",
-                "label", label, "b.currentPage", b.currentPage.Name)
+                "label", label, "b.currentPage", b.currentPage.Name,
+                "tags", debugTags)
 			b.processPageForms(b.currentPage, false, label)
             loggo.Debug("after menu build with current page non-nil have forms", "forms", len(b.forms))
 			b.parseKeyStrokes(b.currentPage, false)
