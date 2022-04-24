@@ -148,19 +148,6 @@ func sleep() {
 	time.Sleep(10 * time.Millisecond)
 }
 
-// convertStringCharRune takes a string and converts it to a rune slice
-// then grabs the rune at index 0 in the slice so that it can return
-// an int32 to satisfy the Uggly protobuf struct for border and fill chars
-// and such. If the input string is less than zero length then it will just
-// rune out a space char and return that int32.
-func convertStringCharRune(s string) int32 {
-	if len(s) == 0 {
-		s = " "
-	}
-	runes := []rune(s)
-	return runes[0]
-}
-
 func initScreen() (s tcell.Screen, err error) {
 	tcell.SetEncodingFallback(tcell.EncodingFallbackASCII)
 	s, err = tcell.NewScreen()
@@ -187,13 +174,20 @@ func detectSpecialKey(ev *tcell.EventKey) (isSpecial bool, keyName string) {
 	return isSpecial, keyName
 }
 
-func (b *ugglyBrowser) processPageForms(page *pb.PageResponse, isMenu bool) {
+func (b *ugglyBrowser) processPageForms(page *pb.PageResponse, isMenu bool, label string) {
+    loggo.Debug("starting processPageForms", "label", label, "startingForms", len(b.forms))
+    loggo.Debug("purging all forms")
 	b.forms = make([]*ugform.Form, 0) // purge existing forms
+    if isMenu {
+        loggo.Debug("job flagged as isMenu so purging menu forms")
+        b.menuForms = make([]*ugform.Form, 0) // purge existing forms
+    }
 	if page.Elements != nil {
 		for _, form := range page.Elements.Forms {
+            loggo.Debug("convering page form to ugform")
 			f, err := ugcon.ConvertFormLocalForm(form, b.view)
 			if err != nil {
-				loggo.Error("error processing form", "err", err.Error())
+				loggo.Error("error processing form", "err", err.Error(), "label", label)
 				continue
 			}
 			// now we have it in ugform.Form format so
@@ -201,11 +195,13 @@ func (b *ugglyBrowser) processPageForms(page *pb.PageResponse, isMenu bool) {
 			// shove the form into DivBox like the docs say we do
 			// this prevents them from covering the menu too
 			// if people tell them to start at positionY = 0
+            loggo.Debug("shifting forms to be relative to DivBox")
 			for _, div := range page.DivBoxes.Boxes {
 				if form.DivName == div.Name {
 					loggo.Debug("shifting form to start in DivBox",
 						"formName", form.Name,
-						"divName", div.Name)
+						"divName", div.Name,
+                        "label", label)
 					sX := int(div.StartX)
 					sY := int(div.StartY + div.BorderW)
 					if !isMenu {
@@ -214,21 +210,28 @@ func (b *ugglyBrowser) processPageForms(page *pb.PageResponse, isMenu bool) {
 					f.ShiftXY(sX, sY)
 				}
 			}
-			b.forms = append(b.forms, f)
 			if isMenu {
-				b.menuForms = make([]*ugform.Form, 0) // purge existing forms
 				b.menuForms = append(b.menuForms, f)
-			}
-		}
-		// always add back the menu forms
-		for _, mf := range b.menuForms {
-			b.forms = append(b.forms, mf)
+			} else {
+                loggo.Debug("adding page form to b.forms", "beforeAdd", len(b.forms))
+                b.forms = append(b.forms, f)
+            }
 		}
 	}
+    // always add back the menu forms
+    loggo.Debug("before adding back menu forms", "beforeAddMenuForms", len(b.forms), "numMenuForms", len(b.menuForms))
+    for _, mf := range b.menuForms {
+        b.forms = append(b.forms, mf)
+    }
+    loggo.Debug("have final forms",
+        "forms", len(b.forms),
+        "menuForms", len(b.menuForms),
+        "label", label)
 }
 
 func (b *ugglyBrowser) buildContentMenu(label string) {
 	// makes boxes for the uggcli menu top bar
+    label = fmt.Sprintf("%s-buildContentMenu", label)
 	var msg string
 	if len(b.messages) > 0 {
 		msg = *b.messages[len(b.messages)-1]
@@ -238,7 +241,12 @@ func (b *ugglyBrowser) buildContentMenu(label string) {
 	localPage := buildPageMenu(
 		b.vW, b.menuHeight, b.sess.server, b.sess.port, b.sess.currPage, msg, b.sess.secure)
 	b.parseKeyStrokes(localPage, true) // retain keyStrokes when injecting Menu
-	b.processPageForms(localPage, true)
+    loggo.Debug("after menu build have forms", "pageForms", len(localPage.Elements.Forms))
+	b.processPageForms(localPage, true, label)
+    loggo.Debug("after processPageForms have browser forms", "forms", len(b.forms), "menuForms", len(b.menuForms))
+    for _, form := range(b.forms) {
+        loggo.Debug("form details", "formName", form.Name)
+    }
 	var err error
 	b.contentMenu, err = convertPageBoxes(localPage)
 	if err != nil {
@@ -251,7 +259,10 @@ func (b *ugglyBrowser) buildContentMenu(label string) {
 		return
 	default:
 		if b.currentPage != nil {
-			b.processPageForms(b.currentPage, false)
+            loggo.Debug("menu build but current page not nil so processing forms and keystrokes with menu=false",
+                "label", label, "b.currentPage", b.currentPage.Name)
+			b.processPageForms(b.currentPage, false, label)
+            loggo.Debug("after menu build with current page non-nil have forms", "forms", len(b.forms))
 			b.parseKeyStrokes(b.currentPage, false)
 		}
 		b.drawContent("menu")
@@ -277,6 +288,15 @@ func (b *ugglyBrowser) menuWatch() {
 // can be called a goroutine for lazy message sending
 func (b *ugglyBrowser) sendMessage(msg, label string) {
 	b.messageBuffer <- msg
+}
+
+func (b *ugglyBrowser) settingsPage() {
+	thisfunc := "settingsPage"
+    loggo.Info("building settings page")
+	b.currentPage = buildSettings(b.vW, b.vH, b.settings)
+	b.currentPageLocal = b.currentPage
+	go b.sendMessage("Local Settings", thisfunc)
+	b.handle(b.buildDraw(thisfunc))
 }
 
 func (b *ugglyBrowser) colorDemo() {
@@ -649,7 +669,7 @@ func (b *ugglyBrowser) pollEvents(ctx context.Context) {
 		switch ev := ev.(type) {
 		case *tcell.EventKey:
 			switch ev.Key() {
-			case tcell.KeyF12:
+			case tcell.KeyF10:
 				b.cexCancel <- "user-cancel"
 				b.exit(0)
 				return
@@ -662,6 +682,9 @@ func (b *ugglyBrowser) pollEvents(ctx context.Context) {
 			case tcell.KeyF2:
 				b.cexCancel <- "user-cancel"
 				b.colorDemo()
+			case tcell.KeyF3:
+				b.cexCancel <- "user-cancel"
+				b.settingsPage()
 			case tcell.KeyF5:
 				b.cexCancel <- "user-cancel"
 				b.refresh(ctx)
@@ -838,19 +861,21 @@ func (b *ugglyBrowser) parseKeyStrokes(page *pb.PageResponse, menu bool) {
 // buildDraw takes all of the currently set content in the browser
 // and renders it then triggers a draw action
 func (b *ugglyBrowser) buildDraw(label string) (err error) {
+	label = fmt.Sprintf("%s-buildDraw", label)
 	b.contentExt, err = convertPageBoxes(b.currentPage)
 	if err != nil {
 		loggo.Error("error compiling boxes", "err", err.Error())
 		return err
 	}
+    // make sure we process forms and keystrokes even if we got here
+    // during a menu build
 	if b.currentPage != nil {
-		b.processPageForms(b.currentPage, false)
+		b.processPageForms(b.currentPage, false, label)
 		b.parseKeyStrokes(b.currentPage, false)
 	}
 	loggo.Debug("clearing screen contents")
 	b.view.Clear()
-	msg := fmt.Sprintf("buildDraw-%s", label)
-	b.drawContent(msg)
+	b.drawContent(label)
 	return err
 }
 
@@ -903,6 +928,14 @@ func (b *ugglyBrowser) drawContent(label string) {
 		f.Start()
 	}
 	b.view.Show()
+    // collect some stats
+    dsForms := len(b.forms)
+    dsMenuBoxes := len(b.contentMenu)
+    dsExtBoxes := len(b.contentExt)
+    dsTotalBoxes := len(content)
+    loggo.Info("---------Draw Stats------------",
+        "forms", dsForms, "menuBoxes", dsMenuBoxes,
+        "extBoxes", dsExtBoxes, "totalBoxes", dsTotalBoxes)
 }
 
 type ugglyBrowser struct {
@@ -939,6 +972,12 @@ type ugglyBrowserSettings struct {
 	// the ENV var that stores the vault encryption password
 	VaultPassEnvVar string `yaml:"vaultPassEnvVar"`
 	VaultFile       string `yaml:"vaultFile"`
+    Bookmarks       []*BookMark `yaml:"bookMarks"`
+}
+
+type BookMark struct {
+    Ugri string
+    Description string
 }
 
 // newBrowser initializes all of the browser's properties
