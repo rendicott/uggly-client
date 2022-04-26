@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github.com/gdamore/tcell/v2"
 	pb "github.com/rendicott/uggly"
-    "github.com/rendicott/uggo"
+	"github.com/rendicott/uggo"
 )
 
 func buildFeedBrowser(width int, keyStrokes []*pb.KeyStroke) *pb.PageResponse {
@@ -44,75 +44,203 @@ func buildFeedBrowser(width int, keyStrokes []*pb.KeyStroke) *pb.PageResponse {
 	return &localPage
 }
 
-func buildSettings(width, height int, s *ugglyBrowserSettings) *pb.PageResponse {
-    theme := genMenuTheme()
-	localPage := pb.PageResponse{
-		Name:     "settings",
+func buildBookmarks(width, height int, s *ugglyBrowserSettings) *pb.PageResponse {
+	theme := genMenuTheme()
+	localPage := &pb.PageResponse{
+		Name:     "uggcli-bookmarks",
 		DivBoxes: &pb.DivBoxes{},
 		Elements: &pb.Elements{},
 	}
-    divName := "settings-outer"
+	divStartX := uggo.Percent(15, width)
+	divStartY := uggo.Percent(15, height)
+	divWidth := int32(width) - (2 * divStartX)
+	divHeight := int32(height) - (2 * divStartY)
+	divName := "bookmarks-outer"
 	localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes,
-            theme.StylizeDivBox(&pb.DivBox{
-		Name:     divName,
-		StartX:   int32(width-(width/10)),
-		StartY:   int32(height-(height/10)),
-		Width:    int32(width-(width/10)),
-		Height:   int32(height-(height/10)),
-	}))
-    keyStroke := "j"
-    //submitPage := "applySettings"
-    //formName := "settings"
-    //settingsForm := pb.Form{
-    //    Name: formName,
-    //    DivName: divName,
-    //    SubmitLink: &pb.Link{
-    //        PageName: submitPage,
-    //    },
-    //    TextBoxes: []*pb.TextBox{
-    //        theme.StylizeTextBox(&pb.TextBox{
-    //            Name: "",
-    //            TabOrder: 1,
-    //            DefaultValue: "",
-    //            Description: "",
-    //            PositionX: 10,
-    //            PositionY: 10,
-    //            Height: 1,
-    //            Width: 10,
-    //            ShowDescription: true,
-    //        }),
-    //    },
-    //}
-    //localPage.Elements.Forms = append(localPage.Elements.Forms, &settingsForm)
-	//localPage.KeyStrokes = append(localPage.KeyStrokes, &pb.KeyStroke{
-	//	KeyStroke: keyStroke,
-	//	Action: &pb.KeyStroke_FormActivation{
-	//		FormActivation: &pb.FormActivation{
-	//			FormName: formName,
-	//		}}})
-	msg := fmt.Sprintf("Settings - Hit (%s) to activate form", keyStroke)
+		theme.StylizeDivBox(&pb.DivBox{
+			Name:   divName,
+			Border: true,
+			StartX: divStartX,
+			StartY: divStartY,
+			Width:  divWidth,
+			Height: divHeight,
+		}))
+	msg := fmt.Sprintf("Bookmarks Browser\n\n")
+	for i, bm := range s.Bookmarks {
+		if i > len(uggo.StrokeMap) - 1 {
+			break
+		}
+		stroke := uggo.StrokeMap[i]
+		msg += fmt.Sprintf("(%s) -- %s: %s\n\n",
+			stroke, *bm.ShortName, *bm.Ugri)
+		link, err := linkFromString(*bm.Ugri)
+		if err != nil {
+			loggo.Debug("error generating Link from bookmark",
+				"error", err.Error(),
+				"Ugri", *bm.Ugri)
+		}
+		localPage.KeyStrokes = append(localPage.KeyStrokes, &pb.KeyStroke{
+			KeyStroke: stroke,
+			Action: &pb.KeyStroke_Link{
+				Link: link,
+		}})
+	}
 	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs,
 		theme.StylizeTextBlob(&pb.TextBlob{
 			Content:  msg,
 			Wrap:     true,
 			DivNames: []string{divName},
 		}))
+	return localPage
+}
+
+func buildSettings(width, height int, s *ugglyBrowserSettings, infoMsg string) *pb.PageResponse {
+	theme := genMenuTheme()
+	localPage := pb.PageResponse{
+		Name:     "uggcli-settings",
+		DivBoxes: &pb.DivBoxes{},
+		Elements: &pb.Elements{},
+	}
+	divStartX := uggo.Percent(5, width)
+	divStartY := uggo.Percent(5, height)
+	divWidth := int32(width) - (2 * divStartX)
+	divHeight := int32(height) - (2 * divStartY)
+	divName := "settings-outer"
+	localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes,
+		theme.StylizeDivBox(&pb.DivBox{
+			Name:   divName,
+			Border: true,
+			StartX: divStartX,
+			StartY: divStartY,
+			Width:  divWidth,
+			Height: divHeight,
+		}))
+	keyStroke := "j"
+	submitPage := "applySettings"
+	formName := "uggcli-settings"
+	tbWidth := uggo.Percent(20, int(divWidth))
+	tbPosX := int32(30)
+	settingsForm := pb.Form{
+		Name:    formName,
+		DivName: divName,
+		SubmitLink: &pb.Link{
+			PageName: submitPage,
+		},
+		TextBoxes: []*pb.TextBox{
+			theme.StylizeTextBox(&pb.TextBox{
+				Name:            "VaultPassEnvVar",
+				TabOrder:        1,
+				DefaultValue:    *s.VaultPassEnvVar,
+				Description:     "Cookie Vault ENV var",
+				PositionX:       tbPosX,
+				PositionY:       divStartY + 4,
+				Height:          1,
+				Width:           tbWidth,
+				ShowDescription: true}),
+
+			theme.StylizeTextBox(&pb.TextBox{
+				Name:            "VaultFile",
+				TabOrder:        2,
+				DefaultValue:    *s.VaultFile,
+				Description:     "Cookie Vault file path",
+				PositionX:       tbPosX,
+				PositionY:       divStartY + 6,
+				Height:          1,
+				Width:           tbWidth,
+				ShowDescription: true}),
+		}}
+	divCenter := divStartX + uggo.Percent(50, int(divWidth))
+	bmDivX := divStartX+divCenter
+	bmDivY := divStartY+2
+	bmDivHeight := divHeight - 4
+	bmDivWidth := uggo.Percent(40, int(divWidth))
+	bmDiv := theme.StylizeDivBox(&pb.DivBox{
+		Name:   "bookmarks",
+		Border: true,
+		StartX: bmDivX,
+		StartY: bmDivY,
+		Width:  bmDivWidth,
+		Height: bmDivHeight,
+	})
+	bmDiv.FillSt = uggo.Style("black","cornsilk")
+	localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes, bmDiv)
+	tbPosX2 := divCenter + 2
+	tbPosY2 := divStartY + 2
+	tabOrder := int32(3)
+	bmTbWidthSn := uggo.Percent(20, int(bmDivWidth))
+	bmTbWidthUg := uggo.Percent(65, int(bmDivWidth))
+	for i, bm := range s.Bookmarks {
+		tbPosY2+=2
+		bmNameUgri := fmt.Sprintf("bookmark_ugri_%d", *bm.uid)
+		bmNameShortName := fmt.Sprintf("bookmark_shortname_%d", *bm.uid)
+		loggo.Debug("adding bookmark to settings form",
+			"bm.Ugri", bm.Ugri,
+			"i", i,
+			"bmNameUgri", bmNameUgri,
+			"bm.uid", bm.uid)
+		settingsForm.TextBoxes = append(settingsForm.TextBoxes,
+				theme.StylizeTextBox(&pb.TextBox{
+			Name:            bmNameShortName,
+			TabOrder:        tabOrder,
+			DefaultValue:    *bm.ShortName,
+			PositionX:       tbPosX2,
+			PositionY:       tbPosY2,
+			Height:          1,
+			Width:           bmTbWidthSn,
+			ShowDescription: false}))
+		tabOrder++
+		settingsForm.TextBoxes = append(settingsForm.TextBoxes,
+				theme.StylizeTextBox(&pb.TextBox{
+			Name:            bmNameUgri,
+			TabOrder:        tabOrder,
+			DefaultValue:    *bm.Ugri,
+			PositionX:       tbPosX2+bmTbWidthSn+3,
+			PositionY:       tbPosY2,
+			Height:          1,
+			Width:           bmTbWidthUg,
+			ShowDescription: false}))
+		tabOrder++
+	}
+	localPage.Elements.Forms = append(localPage.Elements.Forms, &settingsForm)
+	localPage.KeyStrokes = append(localPage.KeyStrokes, &pb.KeyStroke{
+		KeyStroke: keyStroke,
+		Action: &pb.KeyStroke_FormActivation{
+			FormActivation: &pb.FormActivation{
+				FormName: formName,
+			}}})
+	msg := fmt.Sprintf("Settings - Hit (%s) to activate form\n" +
+		"Then Enter to submit", keyStroke)
+	if infoMsg != "" { // maens we got sent back so we need to give the user info
+		msg += fmt.Sprintf("\n\n%s", infoMsg)
+	}
+	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs,
+		theme.StylizeTextBlob(&pb.TextBlob{
+			Content:  msg,
+			Wrap:     true,
+			DivNames: []string{divName},
+		}))
+	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs,
+		theme.StylizeTextBlob(&pb.TextBlob{
+			Content:  "Bookmarks:",
+			Wrap:     true,
+			DivNames: []string{"bookmarks"},
+		}))
 	return &localPage
 }
 
-func genMenuTheme() (*uggo.Theme) {
-    return &uggo.Theme{
-		StyleTextBoxDescription: uggo.Style("white", "black"),
+func genMenuTheme() *uggo.Theme {
+	return &uggo.Theme{
+		StyleTextBoxDescription: uggo.Style("black", "navajowhite"),
 		StyleTextBoxCursor:      uggo.Style("black", "white"),
-		StyleTextBoxText:        uggo.Style("white", "cyan"),
-		StyleTextBoxFill:        uggo.Style("white", "cyan"),
-		StyleDivFill:            uggo.Style("white", "black"),
+		StyleTextBoxText:        uggo.Style("white", "darkblue"),
+		StyleTextBoxFill:        uggo.Style("white", "darkblue"),
+		StyleDivFill:            uggo.Style("white", "navajowhite"),
 		StyleDivBorder:          uggo.Style("white", "black"),
 		StyleTextBlob:           uggo.Style("white", "black"),
 		DivBorderWidth:          int32(1),
 		DivBorderChar:           uggo.ConvertStringCharRune("="),
-		DivFillChar:             uggo.ConvertStringCharRune("."),
-    }
+		DivFillChar:             uggo.ConvertStringCharRune(""),
+	}
 }
 
 func buildStatus(message string, width, height int) *pb.PageResponse {
@@ -183,12 +311,13 @@ func buildPageMenu(width, height int, server, port, page, msg string, secure boo
 		FillSt:   uggo.Style("white", "white"),
 	})
 	menuText := fmt.Sprintf(
-		"uggcli-menu v%s === " +
-        "  ColorDemo (F2)" +
-        "  Settings (F3)" +
-        "  Browse Feed (F4)" +
-        "  Refresh (F5)" +
-        "  Exit (F10)",
+		"uggcli-menu v%s === "+
+			"  ColorDemo (F2)"+
+			"  Settings (F3)"+
+			"  Browse Feed (F4)"+
+			"  Refresh (F5)"+
+			"  Bookmarks (F6)"+
+			"  Exit (F10)",
 		version)
 	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &pb.TextBlob{
 		Content:  menuText,
@@ -309,7 +438,6 @@ func buildColorDemo(width, height int) *pb.PageResponse {
 	for i := 1; i < rows+1; i++ { // number of colums
 		wroteCols++
 		for j := 1; j < cols+1; j++ {
-			loggo.Debug("colorGrab", "len(colors)", len(colors), "colorIndex", colorIndex)
 			if colorIndex >= len(colors) {
 				break
 			}

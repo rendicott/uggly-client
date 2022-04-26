@@ -34,7 +34,7 @@ type serverCookies struct {
 
 func (b *ugglyBrowser) loadVault() (vault *uggsec.Vault, err error) {
 	params := uggsec.VaultInput{
-		Filename: b.settings.VaultFile,
+		Filename: *b.settings.VaultFile,
 		Service:  "ugglyc",
 		User:     "browser",
 	}
@@ -43,7 +43,7 @@ func (b *ugglyBrowser) loadVault() (vault *uggsec.Vault, err error) {
 		loggo.Error("error initiating keyring", "error", err.Error())
 		loggo.Info("using ENV var instead")
 		// must contain 32 byte string. Defaults to UGGSECP if left blank
-		params.PasswordEnvVar = b.settings.VaultPassEnvVar
+		params.PasswordEnvVar = *b.settings.VaultPassEnvVar
 		vault, err = uggsec.InitSmart(&params)
 		if err != nil {
 			return vault, err

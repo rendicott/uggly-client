@@ -12,7 +12,9 @@ import (
 var Loggo log15.Logger
 
 func (bi *DivBox) addTextBlob(tb *TextBlob) {
-	Loggo.Debug("entering addTextBlob")
+	debugTags := []string{"boxes","draw"}
+	Loggo.Debug("entering addTextBlob",
+		"tags", debugTags)
 	fillWidth := bi.fillX2 - bi.fillX1
 	fillHeight := bi.fillY2 - bi.fillY1
 	var charMap map[int][]rune
@@ -27,7 +29,7 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 			"row", i,
 			"len", len(charMap[i]),
 			"function", "addTextBlob",
-		)
+			"tags", debugTags)
 	}
 	// track how much content we were able to actually fit
 	invisible := len(charMap) - fillHeight
@@ -47,13 +49,13 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 		"charMap", len(charMap),
 		"fillHeight", fillHeight,
 		"invisible-lines", invisible,
-	)
+		"tags", debugTags)
 	// log some info about colors
 	fg, _, _ := tb.Style.Decompose()
 	Loggo.Debug("have style color",
 		"stylefgcolor", fg.TrueColor(),
 		"function", "addTextBlob",
-	)
+		"tags", debugTags)
 	debugSampleRate := 10
 	pixelCount := 0
 	logPixels := false
@@ -62,7 +64,9 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 		logPixel = true
 	}
 	// now fill to max height
-	Loggo.Debug("populating divbox with text chars", "fillHeight", fillHeight)
+	Loggo.Debug("populating divbox with text chars",
+		"fillHeight", fillHeight,
+		"tags", debugTags)
 	//for i := 0; i < fillHeight; i++ {
 	for i := 0; i < len(charMap); i++ {
 		for j, char := range charMap[i] {
@@ -77,7 +81,7 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 						"row", i, "col", j,
 						"pixelCount", pixelCount,
 						"function", "addTextBlob",
-					)
+						"tags", debugTags)
 				}
 			}
 			// protect from index out of range if something else failed
@@ -97,7 +101,7 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 					"i", i, "fillHeight", fillHeight,
 					"invisible", invisible,
 					"len(bi.HiddenContents)", len(bi.HiddenContents[0]),
-				)
+					"tags", debugTags)
 			}
 		}
 	}
@@ -112,7 +116,10 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 // Init establishes Borders, padding and instantiates
 // Pixelmap with usable space
 func (bi *DivBox) Init() {
-	Loggo.Debug("initializing box", "BorderChar", bi.BorderChar)
+	debugTags := []string{"boxes","draw"}
+	Loggo.Debug("initializing box",
+		"BorderChar", bi.BorderChar,
+		"tags", debugTags)
 	// set BorderW to 0 if Border is false
 	if !bi.Border {
 		bi.BorderW = 0
@@ -208,10 +215,13 @@ type TextBlob struct {
 // MateBoxes takes a slice of DivBoxes and attaches
 // itself to the DivBox's textBlobs property
 func (tb *TextBlob) MateBoxes(bxs []*DivBox) {
+	debugTags := []string{"boxes","draw"}
 	for _, bx := range bxs {
 		for _, name := range tb.DivNames {
 			if bx.Name == name {
-				Loggo.Debug("appending textBlob to div", "name", name)
+				Loggo.Debug("appending textBlob to div",
+					"name", name,
+					"tags", debugTags)
 				bx.textBlobs = append(bx.textBlobs, tb)
 			}
 		}

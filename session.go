@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	pb "github.com/rendicott/uggly"
+	"github.com/rendicott/uggo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"io"
@@ -174,12 +175,9 @@ func (s *session) feedKeyStrokes() (keyStrokes []*pb.KeyStroke, err error) {
 		}
 		return keyStrokes, err
 	}
-	strokeMap := []string{"1", "2", "3", "4", "5", "6", "7", "8", "9",
-		"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
-		"n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"}
 	for i, page := range feed.Pages {
 		keyStrokes = append(keyStrokes, &pb.KeyStroke{
-			KeyStroke: strokeMap[i],
+			KeyStroke: uggo.StrokeMap[i],
 			Action: &pb.KeyStroke_Link{
 				Link: &pb.Link{
 					PageName: page.Name,
