@@ -26,6 +26,8 @@ var version string
 var (
 	logFile  = "uggcli.log.json"
 	logLevel = flag.String("loglevel", "info", "log level 'info' or 'debug'")
+	breaks = flag.Bool("breaks", false, "when set the program will stop at various" +
+		" points so the log can be read easier")
 	ugri     = flag.String("UGRI", "", "The uggly resource identifier, "+
 		"e.g., ugtps://myserver.domain.net:8443/home")
 	genPass = flag.Bool("vault-pass-gen", false, "On systems that do not have an OS "+
@@ -506,6 +508,7 @@ func (b *ugglyBrowser) get2(ctx context.Context, pq *pb.PageRequest) {
 	pq.ClientHeight = int32(b.vH)
 	dest := fmt.Sprintf("%s:%s", pq.Server, pq.Port)
 	b.sendMessage(fmt.Sprintf("dialing server '%s'...", dest), "get2-preDial")
+	b.breaks("PRE-GET")
 	if pq.Stream {
 		loggo.Info("connecting to stream")
 		stream := make(chan *pb.PageResponse)
@@ -516,6 +519,7 @@ func (b *ugglyBrowser) get2(ctx context.Context, pq *pb.PageRequest) {
 		go b.sendMessage("connected to stream!", "get2-stream-success")
 		b.currentPageLocal = nil // so refresh knows to get external
 		err = b.sess.getStream(ctxc, pqc, stream)
+		b.breaks("AFTER STREAM GET")
 		if err != nil {
 			loggo.Error("error getting stream", "error", err.Error())
 			b.sendMessage("error getting stream", "get2-stream-fail")
@@ -778,6 +782,23 @@ func (b *ugglyBrowser) handleKeyStrokes(ctx context.Context, ev *tcell.EventKey)
 	}
 }
 
+
+func (b *ugglyBrowser) breaks(message string) {
+	if b.debugBreaks {
+		for {
+			loggo.Debug("stopping at break point", "message", message)
+			fmt.Printf("\n\n\nBREAK\n%s", message)
+			ev := b.view.PollEvent()
+			switch ev := ev.(type) {
+			case *tcell.EventKey:
+				switch ev.Key() {
+				case tcell.KeyEnter:
+					return
+				}
+			}
+		}
+	}
+}
 
 func (b *ugglyBrowser) pollEvents(ctx context.Context) {
 	for {
@@ -1106,6 +1127,7 @@ type ugglyBrowser struct {
 	// define channels for context vendor
 	cexCancel, cexJobs chan string
 	cexOut             chan context.Context
+	debugBreaks       bool
 }
 
 // newBrowser initializes all of the browser's properties
@@ -1156,6 +1178,7 @@ func (b *ugglyBrowser) start(ugri string) (err error) {
 	// start menu watcher which looks for messages to be
 	// displayed in menu status bar
 	go b.menuWatch()
+	b.breaks("START")
 	// draw a blank page with menu to start
 	loggo.Info("building menu content")
 	if ugri != "" {
@@ -1225,6 +1248,7 @@ func main() {
 		os.Exit(0)
 	}
 	brow = newBrowser()
+	brow.debugBreaks = *breaks
 	var err error
 	brow.settingsFile = *configFile
 	brow.settings = brow.settingsLoad()
