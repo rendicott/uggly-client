@@ -96,7 +96,8 @@ func buildBookmarks(width, height int, s *ugglyBrowserSettings) *pb.PageResponse
 
 func buildSettings(width, height int, s *ugglyBrowserSettings, infoMsg string) *pb.PageResponse {
 	theme := genMenuTheme()
-	localPage := pb.PageResponse{
+	uggo.ThemeDefault = theme
+	localPage := &pb.PageResponse{
 		Name:     "uggcli-settings",
 		DivBoxes: &pb.DivBoxes{},
 		Elements: &pb.Elements{},
@@ -153,7 +154,7 @@ func buildSettings(width, height int, s *ugglyBrowserSettings, infoMsg string) *
 	bmDivX := divStartX+divCenter
 	bmDivY := divStartY+2
 	bmDivHeight := divHeight - 4
-	bmDivWidth := uggo.Percent(40, int(divWidth))
+	bmDivWidth := uggo.Percent(40, int(divWidth)) + 6
 	bmDiv := theme.StylizeDivBox(&pb.DivBox{
 		Name:   "bookmarks",
 		Border: true,
@@ -162,14 +163,28 @@ func buildSettings(width, height int, s *ugglyBrowserSettings, infoMsg string) *
 		Width:  bmDivWidth,
 		Height: bmDivHeight,
 	})
-	bmDiv.FillSt = uggo.Style("black","cornsilk")
 	localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes, bmDiv)
-	tbPosX2 := divCenter + 2
-	tbPosY2 := divStartY + 2
 	tabOrder := int32(3)
 	bmTbWidthSn := uggo.Percent(20, int(bmDivWidth))
 	bmTbWidthUg := uggo.Percent(65, int(bmDivWidth))
+	tbPosX1 := divCenter + 2
+	tbPosX2 := tbPosX1+bmTbWidthSn+3
+	tbPosY2 := divStartY + 2
+	colShort := "Short Name"
+	colUgri := "UGRI"
+	colDel := "del\n\n"
+	colShortX := int(tbPosX1 + divStartX)
+	colY := int(tbPosY2 + divStartY) + 1
+	colUgriX := int(tbPosX2 + divStartX)
+	colDelX := int(colUgriX) + int(bmTbWidthUg) + 1
+	localPage = uggo.AddTextAt(
+		localPage, colShortX, colY, len(colShort), 1, colShort)
+	localPage = uggo.AddTextAt(
+		localPage, colUgriX, colY, len(colUgri), 1, colUgri)
 	for i, bm := range s.Bookmarks {
+		if i > len(uggo.StrokeMap) - 1 {
+			break // bail if we have more bookmarks than strokes
+		}
 		tbPosY2+=2
 		bmNameUgri := fmt.Sprintf("bookmark_ugri_%d", *bm.uid)
 		bmNameShortName := fmt.Sprintf("bookmark_shortname_%d", *bm.uid)
@@ -183,7 +198,7 @@ func buildSettings(width, height int, s *ugglyBrowserSettings, infoMsg string) *
 			Name:            bmNameShortName,
 			TabOrder:        tabOrder,
 			DefaultValue:    *bm.ShortName,
-			PositionX:       tbPosX2,
+			PositionX:       tbPosX1,
 			PositionY:       tbPosY2,
 			Height:          1,
 			Width:           bmTbWidthSn,
@@ -194,13 +209,26 @@ func buildSettings(width, height int, s *ugglyBrowserSettings, infoMsg string) *
 			Name:            bmNameUgri,
 			TabOrder:        tabOrder,
 			DefaultValue:    *bm.Ugri,
-			PositionX:       tbPosX2+bmTbWidthSn+3,
+			PositionX:       tbPosX2,
 			PositionY:       tbPosY2,
 			Height:          1,
 			Width:           bmTbWidthUg,
 			ShowDescription: false}))
 		tabOrder++
+		// now add the link and text to the del columb's textblob
+		stroke := uggo.StrokeMap[i]
+		colDel += fmt.Sprintf("(%s)\n\n", stroke)
+		localAuthUuid = uggo.NewUuid()
+		delPage := fmt.Sprintf("bookmark_delete_%d_%s", *bm.uid, localAuthUuid)
+		delPageLink := pb.Link{ PageName: delPage }
+		localPage.KeyStrokes = append(localPage.KeyStrokes, &pb.KeyStroke{
+			KeyStroke: stroke,
+			Action: &pb.KeyStroke_Link{
+				Link: &delPageLink,
+		}})
 	}
+	localPage = uggo.AddTextAt(
+		localPage, colDelX, colY, 4, height, colDel)
 	localPage.Elements.Forms = append(localPage.Elements.Forms, &settingsForm)
 	localPage.KeyStrokes = append(localPage.KeyStrokes, &pb.KeyStroke{
 		KeyStroke: keyStroke,
@@ -225,8 +253,15 @@ func buildSettings(width, height int, s *ugglyBrowserSettings, infoMsg string) *
 			Wrap:     true,
 			DivNames: []string{"bookmarks"},
 		}))
-	return &localPage
+	bmDiv.FillSt = uggo.Style("black","cornsilk")
+	return localPage
 }
+
+// things that are expecting to have local pages
+// handle sensitive actions can set this so the client
+// can verify that they indeed came from a local source
+// and not someone trying to forge a link
+var localAuthUuid string
 
 func genMenuTheme() *uggo.Theme {
 	return &uggo.Theme{
@@ -317,6 +352,7 @@ func buildPageMenu(width, height int, server, port, page, msg string, secure boo
 			"  Browse Feed (F4)"+
 			"  Refresh (F5)"+
 			"  Bookmarks (F6)"+
+			"  AddBookmark (F7)"+
 			"  Exit (F10)",
 		version)
 	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &pb.TextBlob{

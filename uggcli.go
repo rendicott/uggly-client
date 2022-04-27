@@ -341,6 +341,21 @@ func (b *ugglyBrowser) bookmarksPage() {
 	b.handle(b.buildDraw(thisfunc))
 }
 
+func (b *ugglyBrowser) bookmarkAdd() {
+	thisfunc := "bookmarkAdd"
+	ugri := b.sess.genUgri()
+	b.settings.addBookmark("", *ugri)
+	loggo.Info("adding bookmark")
+	message := fmt.Sprintf("added bookmark: '%s'", *ugri)
+	go b.sendMessage(message, thisfunc)
+	err := b.settingsSave()
+	if err != nil {
+		loggo.Error("error adding bookmark", "err", err.Error())
+		message = "error adding bookmark, check log"
+		go b.sendMessage(message, thisfunc)
+	}
+}
+
 func (b *ugglyBrowser) colorDemo() {
 	thisfunc := "colorDemo"
 	b.currentPage = buildColorDemo(b.vW, b.vH)
@@ -764,13 +779,59 @@ func (b *ugglyBrowser) passForm(ctx context.Context, name string) {
 	}
 }
 
+func (b *ugglyBrowser) isLocal(link *pb.Link) bool {
+	if strings.Contains(link.PageName, localAuthUuid) {
+		loggo.Debug("isLocal verified page request is local",
+			"link.PageName", link.PageName)
+		return true
+	}
+	return false
+}
+
+func (b *ugglyBrowser) localLinkRouter(link *pb.Link) {
+	if b.isLocal(link) { //double check
+		loggo.Info("processing local link")
+		if strings.Contains(link.PageName, "bookmark_delete") {
+			chunks := strings.Split(link.PageName, "_")
+			var bmUidString string
+			if len(chunks) > 2 {
+				bmUid, err := strconv.Atoi(chunks[2])
+				if err != nil {
+					loggo.Debug("error deleting bookmark, could not convert s to int",
+						"err", err.Error(),
+						"bmUidString", bmUidString)
+					b.sendMessage("error deleting bookmark", "bookmark_delete")
+				} else {
+					ok := b.settings.deleteBookmark(bmUid)
+					if ok {
+						infoMsg := "bookmark deleted"
+						err = b.settingsSave()
+						if err != nil {
+							infoMsg += ", error saving settings to disk"
+						}
+						b.sendMessage(infoMsg, "settings-process")
+						b.settingsPage(infoMsg)
+					} else {
+						b.sendMessage("bookmark not deleted, could not find",
+							"bookmark_delete")
+					}
+				}
+			}
+		}
+	}
+}
+
 // keyStrokeRouter determines action type (e.g., page, form, div) and calls the
 // appropriate method
 func (b *ugglyBrowser) keyStrokeRouter(ctx context.Context, ks *pb.KeyStroke) {
 	switch x := ks.Action.(type) {
 	case *pb.KeyStroke_Link:
-		loggo.Debug("keyStrokeRouter sending get2")
-		b.get2(ctx, linkRequest(x.Link))
+		if b.isLocal(x.Link) {
+			b.localLinkRouter(x.Link)
+		} else {
+			loggo.Debug("keyStrokeRouter sending get2")
+			b.get2(ctx, linkRequest(x.Link))
+		}
 	case *pb.KeyStroke_FormActivation:
 		// warning, potentially blocking function
 		// but ctx cancel() will regain control
@@ -840,6 +901,9 @@ func (b *ugglyBrowser) pollEvents(ctx context.Context) {
 			case tcell.KeyF6:
 				b.cexCancel <- "user-cancel"
 				b.bookmarksPage()
+			case tcell.KeyF7:
+				b.cexCancel <- "user-cancel"
+				b.bookmarkAdd()
 			default:
 				loggo.Debug("sending to handleKeyStrokes", "numLinks", len(b.activeKeyStrokes))
 				b.handleKeyStrokes(ctx, ev)
@@ -895,6 +959,7 @@ func (b *ugglyBrowser) linkFiller(partial *pb.Link) (*pb.Link, error) {
 	full.Stream = partial.Stream
 	return &full, err
 }
+
 
 // linkFromString takes a UGLI connection string (e.g., from
 // the address bar) and tries to parse it into a Link object.
@@ -1163,6 +1228,36 @@ func (s *ugglyBrowserSettings) uidifyBookmarks() {
 			"bm.ShortName", bm.ShortName,
 			"bm.uid", *bm.uid)
 	}
+}
+
+func (s *ugglyBrowserSettings) deleteBookmark(uid int) bool {
+	var indexToRemove int
+	found := false
+	for i, bm := range s.Bookmarks {
+		if *bm.uid == uid {
+			found = true
+			indexToRemove = i
+		}
+	}
+	if found {
+		s.Bookmarks = append(s.Bookmarks[:indexToRemove],
+			s.Bookmarks[indexToRemove+1:]...)
+		s.uidifyBookmarks()
+	}
+	// found true means we found it and deleted it
+	return found
+}
+
+func (s *ugglyBrowserSettings) addBookmark(shortName, ugri string) {
+	if shortName == "" {
+		shortName = "added"
+	}
+	b := &BookMark{
+		ShortName: &shortName,
+		Ugri: &ugri,
+	}
+	s.Bookmarks = append(s.Bookmarks, b)
+	s.uidifyBookmarks()
 }
 
 type ugglyBrowserSettings struct {

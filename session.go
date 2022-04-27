@@ -26,6 +26,16 @@ type session struct {
 	clientHeight    int32
 }
 
+func (s *session) genUgri() *string {
+	proto := "ugtp://"
+	if s.secure {
+		proto = "ugtps://"
+	}
+	ugri := fmt.Sprintf("%s%s:%s/%s",
+		proto, s.server, s.port, s.currPage)
+	return &ugri
+}
+
 func (s *session) getConnection(ctx context.Context) (err error) {
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithBlock())
