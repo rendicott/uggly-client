@@ -67,7 +67,7 @@ func buildBookmarks(width, height int, s *ugglyBrowserSettings) *pb.PageResponse
 		}))
 	msg := fmt.Sprintf("Bookmarks Browser\n\n")
 	for i, bm := range s.Bookmarks {
-		if i > len(uggo.StrokeMap) - 1 {
+		if i > len(uggo.StrokeMap)-1 {
 			break
 		}
 		stroke := uggo.StrokeMap[i]
@@ -83,7 +83,7 @@ func buildBookmarks(width, height int, s *ugglyBrowserSettings) *pb.PageResponse
 			KeyStroke: stroke,
 			Action: &pb.KeyStroke_Link{
 				Link: link,
-		}})
+			}})
 	}
 	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs,
 		theme.StylizeTextBlob(&pb.TextBlob{
@@ -97,6 +97,7 @@ func buildBookmarks(width, height int, s *ugglyBrowserSettings) *pb.PageResponse
 func buildSettings(width, height int, s *ugglyBrowserSettings, infoMsg string) *pb.PageResponse {
 	theme := genMenuTheme()
 	uggo.ThemeDefault = theme
+	localAuthUuid = uggo.NewUuid() // we can ref this to trust submissions from this page
 	localPage := &pb.PageResponse{
 		Name:     "uggcli-settings",
 		DivBoxes: &pb.DivBoxes{},
@@ -118,7 +119,7 @@ func buildSettings(width, height int, s *ugglyBrowserSettings, infoMsg string) *
 		}))
 	keyStroke := "j"
 	submitPage := "applySettings"
-	formName := "uggcli-settings"
+	formName := fmt.Sprintf("uggcli-settings-%s", localAuthUuid)
 	tbWidth := uggo.Percent(20, int(divWidth))
 	tbPosX := int32(30)
 	settingsForm := pb.Form{
@@ -151,8 +152,8 @@ func buildSettings(width, height int, s *ugglyBrowserSettings, infoMsg string) *
 				ShowDescription: true}),
 		}}
 	divCenter := divStartX + uggo.Percent(50, int(divWidth))
-	bmDivX := divStartX+divCenter
-	bmDivY := divStartY+2
+	bmDivX := divStartX + divCenter
+	bmDivY := divStartY + 2
 	bmDivHeight := divHeight - 4
 	bmDivWidth := uggo.Percent(40, int(divWidth)) + 6
 	bmDiv := theme.StylizeDivBox(&pb.DivBox{
@@ -168,13 +169,13 @@ func buildSettings(width, height int, s *ugglyBrowserSettings, infoMsg string) *
 	bmTbWidthSn := uggo.Percent(20, int(bmDivWidth))
 	bmTbWidthUg := uggo.Percent(65, int(bmDivWidth))
 	tbPosX1 := divCenter + 2
-	tbPosX2 := tbPosX1+bmTbWidthSn+3
+	tbPosX2 := tbPosX1 + bmTbWidthSn + 3
 	tbPosY2 := divStartY + 2
 	colShort := "Short Name"
 	colUgri := "UGRI"
 	colDel := "del\n\n"
 	colShortX := int(tbPosX1 + divStartX)
-	colY := int(tbPosY2 + divStartY) + 1
+	colY := int(tbPosY2+divStartY) + 1
 	colUgriX := int(tbPosX2 + divStartX)
 	colDelX := int(colUgriX) + int(bmTbWidthUg) + 1
 	localPage = uggo.AddTextAt(
@@ -182,10 +183,10 @@ func buildSettings(width, height int, s *ugglyBrowserSettings, infoMsg string) *
 	localPage = uggo.AddTextAt(
 		localPage, colUgriX, colY, len(colUgri), 1, colUgri)
 	for i, bm := range s.Bookmarks {
-		if i > len(uggo.StrokeMap) - 1 {
+		if i > len(uggo.StrokeMap)-1 {
 			break // bail if we have more bookmarks than strokes
 		}
-		tbPosY2+=2
+		tbPosY2 += 2
 		bmNameUgri := fmt.Sprintf("bookmark_ugri_%d", *bm.uid)
 		bmNameShortName := fmt.Sprintf("bookmark_shortname_%d", *bm.uid)
 		loggo.Debug("adding bookmark to settings form",
@@ -194,38 +195,37 @@ func buildSettings(width, height int, s *ugglyBrowserSettings, infoMsg string) *
 			"bmNameUgri", bmNameUgri,
 			"bm.uid", bm.uid)
 		settingsForm.TextBoxes = append(settingsForm.TextBoxes,
-				theme.StylizeTextBox(&pb.TextBox{
-			Name:            bmNameShortName,
-			TabOrder:        tabOrder,
-			DefaultValue:    *bm.ShortName,
-			PositionX:       tbPosX1,
-			PositionY:       tbPosY2,
-			Height:          1,
-			Width:           bmTbWidthSn,
-			ShowDescription: false}))
+			theme.StylizeTextBox(&pb.TextBox{
+				Name:            bmNameShortName,
+				TabOrder:        tabOrder,
+				DefaultValue:    *bm.ShortName,
+				PositionX:       tbPosX1,
+				PositionY:       tbPosY2,
+				Height:          1,
+				Width:           bmTbWidthSn,
+				ShowDescription: false}))
 		tabOrder++
 		settingsForm.TextBoxes = append(settingsForm.TextBoxes,
-				theme.StylizeTextBox(&pb.TextBox{
-			Name:            bmNameUgri,
-			TabOrder:        tabOrder,
-			DefaultValue:    *bm.Ugri,
-			PositionX:       tbPosX2,
-			PositionY:       tbPosY2,
-			Height:          1,
-			Width:           bmTbWidthUg,
-			ShowDescription: false}))
+			theme.StylizeTextBox(&pb.TextBox{
+				Name:            bmNameUgri,
+				TabOrder:        tabOrder,
+				DefaultValue:    *bm.Ugri,
+				PositionX:       tbPosX2,
+				PositionY:       tbPosY2,
+				Height:          1,
+				Width:           bmTbWidthUg,
+				ShowDescription: false}))
 		tabOrder++
 		// now add the link and text to the del columb's textblob
 		stroke := uggo.StrokeMap[i]
 		colDel += fmt.Sprintf("(%s)\n\n", stroke)
-		localAuthUuid = uggo.NewUuid()
 		delPage := fmt.Sprintf("bookmark_delete_%d_%s", *bm.uid, localAuthUuid)
-		delPageLink := pb.Link{ PageName: delPage }
+		delPageLink := pb.Link{PageName: delPage}
 		localPage.KeyStrokes = append(localPage.KeyStrokes, &pb.KeyStroke{
 			KeyStroke: stroke,
 			Action: &pb.KeyStroke_Link{
 				Link: &delPageLink,
-		}})
+			}})
 	}
 	localPage = uggo.AddTextAt(
 		localPage, colDelX, colY, 4, height, colDel)
@@ -236,7 +236,7 @@ func buildSettings(width, height int, s *ugglyBrowserSettings, infoMsg string) *
 			FormActivation: &pb.FormActivation{
 				FormName: formName,
 			}}})
-	msg := fmt.Sprintf("Settings - Hit (%s) to activate form\n" +
+	msg := fmt.Sprintf("Settings - Hit (%s) to activate form\n"+
 		"Then Enter to submit", keyStroke)
 	if infoMsg != "" { // maens we got sent back so we need to give the user info
 		msg += fmt.Sprintf("\n\n%s", infoMsg)
@@ -253,7 +253,7 @@ func buildSettings(width, height int, s *ugglyBrowserSettings, infoMsg string) *
 			Wrap:     true,
 			DivNames: []string{"bookmarks"},
 		}))
-	bmDiv.FillSt = uggo.Style("black","cornsilk")
+	bmDiv.FillSt = uggo.Style("black", "cornsilk")
 	return localPage
 }
 

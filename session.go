@@ -120,6 +120,9 @@ func (s *session) getStream(ctx context.Context, pq *pb.PageRequest, r chan *pb.
 				close(r)
 				return err
 			}
+			if !strings.Contains(pq.Name, "->") && pq.Stream {
+				pq.Name += "->"
+			}
 			s.currPage = pq.Name
 			r <- page
 		}
