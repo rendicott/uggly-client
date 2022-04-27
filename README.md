@@ -43,6 +43,8 @@ NOTE: [Project Gemini](https://gemini.circumlunar.space/) seems to have similar 
 * ability to immediately connect to a server, port, page via command parameters
 * Cookie support loosely based on HTTP browser cookies. For example, a sessionID cookie provided by a server with an Expiration attribute set will store to disk on close. All cookies without Expiration set are considered session cookies and are purged on close. 
 * Secure cookie storage for non-session cookies on disk on client close. This is stored in an encrypted file with the encryption key either stored in OS keyring or an ENV var that the user specifies. 
+* Settings editor in browser.
+* Supports Page Streams, a server can send a stream of PageResponse's giving the illusion of animation or a stream of information. Unfortunately forms on streams are not stable right now. 
 
 ## Client Notes (developer'ish)
 * Common logging across all sub-packages via [log15](https://github.com/inconshreveable/log15)
@@ -52,13 +54,16 @@ NOTE: [Project Gemini](https://gemini.circumlunar.space/) seems to have similar 
 * all local content (e.g., menu bar and color demo) is created using same proto structs that servers would use. The only difference is that the client can control when this content is generated and how it gets prioritized. 
 
 # TODO:
-* Possibly add the concept of Page streams to support animation or gaming. Should be trivial with gRPC. Would probably add a Page streamer to proto with a time frequency between pages dictated by server with a min/max specified by client. 
 * support more of the underlying tcell screen features such as monochrome detection
 * support sounds?
 * error channel with debug pane
 * ability to extract text - maybe this could be done via "write to file" but would have to consider potential security concerns.
 * more menu options such as "home page", file download location (if that becomes a feature), "help" pages, "about" with version, etc. Will probably need to have menu drop downs to save real-estate
 * add pagination for more than one page of Feed page listings
+* BUGS:
+  * When you cancel out of a stream it jumps back and plays one last frame
+  * Hitting refresh f5 on form submit pages clears cookies for some reason
+  * settings/config editor is blinky, want to look into performance enhancements
 
 # TODONES
 * ~lock forms into divs per uggly spec~
@@ -66,3 +71,5 @@ NOTE: [Project Gemini](https://gemini.circumlunar.space/) seems to have similar 
 * ~Add cookie support so custom sessions can be supported.~
 * ~Add TLS to the gRPC connection. Figure out how to manage certs sanely.~ 
   * Added this but need to figure out how to get better error messages from gRPC. When all the cert stars are not aligned it just times out, e.g., you get a timeout when server doesn't provide chain. 
+* ~Possibly add the concept of Page streams to support animation or gaming. Should be trivial with gRPC. Would probably add a Page streamer to proto with a time frequency between pages dictated by server with a min/max specified by client. ~
+  * this is implemented and wasn't really trivial but it was mostly client side complexity in handling streams vs pages. These are still a little buggy but mostly functional. Don't try to use forms on streams for example. 
