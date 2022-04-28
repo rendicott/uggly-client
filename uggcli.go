@@ -105,27 +105,31 @@ func convertPageBoxes(page *pb.PageResponse) (myBoxes []*boxes.DivBox, err error
 		myBoxes = append(myBoxes, b)
 	}
 	// collect elements from page
-	for _, ele := range page.Elements.TextBlobs {
-		// convert and mate textBlobs to boxes
-		tb, err := ugcon.ConvertTextBlobLocalBoxes(ele)
-		if err != nil {
-			return myBoxes, err
+	if page.Elements != nil {
+		if page.Elements.TextBlobs != nil {
+			for _, ele := range page.Elements.TextBlobs {
+				// convert and mate textBlobs to boxes
+				tb, err := ugcon.ConvertTextBlobLocalBoxes(ele)
+				if err != nil {
+					return myBoxes, err
+				}
+				loggo.Debug("build boxes.TextBlob",
+					"tb.Content", tb.Content,
+					"tags", debugTags)
+				fgcolor, _, _ := tb.Style.Decompose()
+				tcolor := fgcolor.TrueColor()
+				loggo.Debug("style after conversion",
+					"fgcolor", tcolor,
+					"page-name", page.Name,
+					"tags", debugTags)
+				if page.Name == "uggcli-menu" {
+					loggo.Debug("got menu textblob",
+						"content", ele.Content,
+						"tags", debugTags)
+				}
+				tb.MateBoxes(myBoxes)
+			}
 		}
-		loggo.Debug("build boxes.TextBlob",
-			"tb.Content", tb.Content,
-			"tags", debugTags)
-		fgcolor, _, _ := tb.Style.Decompose()
-		tcolor := fgcolor.TrueColor()
-		loggo.Debug("style after conversion",
-			"fgcolor", tcolor,
-			"page-name", page.Name,
-			"tags", debugTags)
-		if page.Name == "uggcli-menu" {
-			loggo.Debug("got menu textblob",
-				"content", ele.Content,
-				"tags", debugTags)
-		}
-		tb.MateBoxes(myBoxes)
 	}
 	for _, bi := range myBoxes {
 		loggo.Debug("calling divbox.Init()",

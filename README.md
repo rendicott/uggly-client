@@ -64,6 +64,7 @@ NOTE: [Project Gemini](https://gemini.circumlunar.space/) seems to have similar 
   * When you cancel out of a stream it jumps back and plays one last frame
   * Hitting refresh f5 on form submit pages clears cookies for some reason
   * settings/config editor is blinky, want to look into performance enhancements
+  * tries to dial blank addresses sometimes, need to stop it from trying this
 
 # TODONES
 * ~lock forms into divs per uggly spec~

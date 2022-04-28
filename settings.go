@@ -1,10 +1,10 @@
 package main
 
 import (
-	"strings"
-	"strconv"
 	"gopkg.in/yaml.v3"
 	"io/ioutil"
+	"strconv"
+	"strings"
 )
 
 func (b *ugglyBrowser) settingsProcess(formContents map[string]string) {
@@ -45,7 +45,7 @@ func (b *ugglyBrowser) settingsProcess(formContents map[string]string) {
 			if len(chunks) > 2 {
 				stringUidWant = chunks[2]
 			}
-			for _, bm := range(b.settings.Bookmarks) {
+			for _, bm := range b.settings.Bookmarks {
 				currStringUid := strconv.Itoa(*bm.uid)
 				loggo.Debug("bookmark",
 					"k", k,
@@ -58,7 +58,7 @@ func (b *ugglyBrowser) settingsProcess(formContents map[string]string) {
 						bm.Ugri = &fv
 					}
 				}
-				if strings.Contains(k, "shortname") && stringUidWant == currStringUid  {
+				if strings.Contains(k, "shortname") && stringUidWant == currStringUid {
 					if *bm.ShortName != fv {
 						changed = true
 						bm.ShortName = &fv
@@ -97,7 +97,7 @@ func (b *ugglyBrowser) settingsSave() (err error) {
 	return err
 }
 
-func (b *ugglyBrowser) settingsLoad() (*ugglyBrowserSettings) {
+func (b *ugglyBrowser) settingsLoad() *ugglyBrowserSettings {
 	filename := b.settingsFile
 	s := ugglyBrowserSettings{}
 	loggo.Info("reloading settings from file", "filename", filename)
@@ -165,7 +165,7 @@ func (s *ugglyBrowserSettings) addBookmark(shortName, ugri string) {
 	}
 	b := &BookMark{
 		ShortName: &shortName,
-		Ugri: &ugri,
+		Ugri:      &ugri,
 	}
 	s.Bookmarks = append(s.Bookmarks, b)
 	s.uidifyBookmarks()
@@ -173,15 +173,13 @@ func (s *ugglyBrowserSettings) addBookmark(shortName, ugri string) {
 
 type ugglyBrowserSettings struct {
 	// the ENV var that stores the vault encryption password
-	VaultPassEnvVar *string `yaml:"vaultPassEnvVar"`
-	VaultFile       *string `yaml:"vaultFile"`
-	Bookmarks       []*BookMark`yaml:"bookMarks"`
+	VaultPassEnvVar *string     `yaml:"vaultPassEnvVar"`
+	VaultFile       *string     `yaml:"vaultFile"`
+	Bookmarks       []*BookMark `yaml:"bookMarks"`
 }
 
 type BookMark struct {
-	Ugri        *string `yaml:"ugri"`
-	ShortName   *string `yaml:"shortName"`
-	uid         *int
+	Ugri      *string `yaml:"ugri"`
+	ShortName *string `yaml:"shortName"`
+	uid       *int
 }
-
-
