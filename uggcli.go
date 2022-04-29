@@ -970,7 +970,7 @@ func (b *ugglyBrowser) resizeHandler(ctx context.Context) {
 	b.sess.clientWidth = int32(w)
 	b.sess.clientHeight = int32(h)
 	b.vW = w
-	b.vH = h
+	b.vH = h - b.menuHeight
 	b.refresh(ctx)
 	//b.updateAll()
 	b.resizing = false
@@ -1171,7 +1171,9 @@ func (b *ugglyBrowser) start(ugri string) (err error) {
 		// not fatal so we'll continue
 		err = nil
 	}
-	b.vW, b.vH = b.view.Size()
+	w, h := b.view.Size()
+	b.vW = w
+	b.vH = h - b.menuHeight
 	go b.startupRefreshDelay()
 	loggo.Info("starting context vendor goroutine")
 	go b.cexVendor()
