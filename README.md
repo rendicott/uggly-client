@@ -5,7 +5,7 @@ There is a client compiled for Windows, Linux, and Mac. Servers can be written i
 
 You obviously have no idea what I'm talking about so maybe a gif demo will help: 
 
-![](./img/demo.gif)
+![](./img/demo.mp4)
 
 
 # Why?
