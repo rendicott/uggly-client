@@ -5,8 +5,11 @@ There is a client compiled for Windows, Linux, and Mac. Servers can be written i
 
 You obviously have no idea what I'm talking about so maybe a gif demo will help: 
 
-<video src="./img/demo.mp4" controls="controls" style="max-width: 730px;">
-</video>
+
+
+https://user-images.githubusercontent.com/6463983/174201804-90e84531-f5e7-4ebe-81e9-81010d2ec64a.mp4
+
+
 
 # Why?
 You may ask yourself, why is this necessary. It's not. But here are a few of the reasons why it was an interesting project:
