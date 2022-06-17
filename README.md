@@ -5,7 +5,10 @@ There is a client compiled for Windows, Linux, and Mac. Servers can be written i
 
 You obviously have no idea what I'm talking about so maybe a gif demo will help: 
 
-![](./img/demo.gif)
+
+
+https://user-images.githubusercontent.com/6463983/174201804-90e84531-f5e7-4ebe-81e9-81010d2ec64a.mp4
+
 
 
 # Why?
