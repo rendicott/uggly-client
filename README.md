@@ -5,8 +5,7 @@ There is a client compiled for Windows, Linux, and Mac. Servers can be written i
 
 You obviously have no idea what I'm talking about so maybe a gif demo will help: 
 
-![](./img/demo.mp4)
-
+<video src='./img/demo.mp4'></a>
 
 # Why?
 You may ask yourself, why is this necessary. It's not. But here are a few of the reasons why it was an interesting project:
