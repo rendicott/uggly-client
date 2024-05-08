@@ -1,4 +1,7 @@
 # uggly-client
+
+[docs and demo servers](http://uggly.bytester.net)
+
 Uggly is a means to generate Terminal User Interfaces in a client-server architecture. Think of it as TUI over-the-wire (TUIOW). The client requests content from the server via gRPC protobuffers and the client handles rendering of that content. The server is sending "pages" of content one screen at a time. The protocol and page definitions take inspiration from CSS/HTML in that there are constructs such as DivBoxes, TextBlobs, Links, and Forms for example. It is opinionated in that only keyboard strokes are supported for link navigation.
 
 There is a client compiled for Windows, Linux, and Mac. Servers can be written in any language that supports gRPC and protobuf (e.g, Go, Python, Java, etc.). New clients could be written I suppose but that's a lot of work and that's why you're here instead.
@@ -8,7 +11,6 @@ You obviously have no idea what I'm talking about so maybe a gif demo will help:
 
 
 https://user-images.githubusercontent.com/6463983/174201804-90e84531-f5e7-4ebe-81e9-81010d2ec64a.mp4
-
 
 
 # Why?
