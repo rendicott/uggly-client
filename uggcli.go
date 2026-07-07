@@ -5,30 +5,30 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/inconshreveable/log15"
 	"github.com/rendicott/ugform"
-	"github.com/rendicott/uggo"
 	pb "github.com/rendicott/uggly"
 	"github.com/rendicott/uggly-client/boxes"
 	"github.com/rendicott/uggly-client/ugcon"
+	"github.com/rendicott/uggo"
 	"github.com/rendicott/uggsec"
-	"net/url"
-	"os"
-	"strings"
-	"strconv"
-	"time"
 )
-
 
 var version string
 
 var (
 	logFile  = "uggcli.log.json"
 	logLevel = flag.String("loglevel", "info", "log level 'info' or 'debug'")
-	breaks = flag.Bool("breaks", false, "when set the program will stop at various" +
+	breaks   = flag.Bool("breaks", false, "when set the program will stop at various"+
 		" points so the log can be read easier")
-	ugri     = flag.String("UGRI", "", "The uggly resource identifier, "+
+	ugri = flag.String("UGRI", "", "The uggly resource identifier, "+
 		"e.g., ugtps://myserver.domain.net:8443/home")
 	genPass = flag.Bool("vault-pass-gen", false, "On systems that do not have an OS "+
 		"keyring the vault encryption password must be stored in an ENV "+
@@ -43,12 +43,40 @@ var (
 		"keyring if available otherwise you'll have to manually generate a password "+
 		"and set an ENV var. See `vault-password-env-var` and `vault-pass-gen` "+
 		"for more details.")
-	configFile = flag.String("config", "config.yml", "filename where browser settings " +
+	configFile = flag.String("config", "config.yml", "filename where browser settings "+
 		"are stored. Command parameters will always override settings loaded from file.")
+	headless = flag.Bool("headless", false, "Run without terminal (uses tcell.SimulationScreen)")
+	autoExit = flag.Bool("auto-exit", false, "Exit immediately when synthetic key queue is exhausted")
+	timeoutF = flag.Float64("timeout", 10, "Seconds to wait after synthetic queue drains before forcing exit")
+	output   = flag.String("output", "", "File path for headless screen capture (default: stdout)")
 )
 
 // loggo is the global logger
 var loggo log15.Logger
+
+// headlessCaptureScreen captures the current screen and writes output to --output file.
+func (b *ugglyBrowser) headlessCaptureScreen() {
+	if !b.headless {
+		return
+	}
+	text, err := b.ScreenOutput()
+	if err != nil {
+		loggo.Warn("failed to capture screen", "error", err.Error())
+		return
+	}
+	if text == "" {
+		return
+	}
+	if *output != "" {
+		if err := os.WriteFile(*output, []byte(text), 0644); err != nil {
+			loggo.Error("failed to write output file", "error", err.Error())
+		} else {
+			loggo.Info("screen capture written", "file", *output)
+		}
+	} else {
+		fmt.Print(text)
+	}
+}
 
 // setLogger sets up logging globally for the packages involved
 // in the gossamer runtime.
@@ -131,7 +159,7 @@ func convertPageBoxes(page *pb.PageResponse) (myBoxes []*boxes.DivBox, err error
 		loggo.Debug("calling divbox.Init()",
 			"tags", debugTags)
 		bi.Init()
-		if len(bi.RawContents) > 0 {
+		if len(bi.RawContents) > 0 && bi.Height != 0 && bi.Width != 0 {
 			loggo.Debug("divbox rawcontents first pixel",
 				"pixel", bi.RawContents[0][0].C,
 				"tags", debugTags)
@@ -159,20 +187,24 @@ func (b *ugglyBrowser) handle(err error) {
 	}
 }
 
-func initScreen() (s tcell.Screen, err error) {
+func initScreen(headless bool) (s tcell.Screen, err error) {
 	tcell.SetEncodingFallback(tcell.EncodingFallbackASCII)
-	s, err = tcell.NewScreen()
-	if err != nil {
-		return s, err
+	var tcellErr error
+	if headless {
+		s = tcell.NewSimulationScreen("UTF-8")
+	} else {
+		s, tcellErr = tcell.NewScreen()
+		if tcellErr != nil {
+			return nil, tcellErr
+		}
 	}
-	err = s.Init()
-	if err != nil {
-		return s, err
+	if tcellErr = s.Init(); tcellErr != nil {
+		return nil, tcellErr
 	}
 	s.SetStyle(tcell.StyleDefault.
 		Foreground(tcell.ColorWhite).
 		Background(tcell.ColorBlack))
-	return s, err
+	return s, nil
 }
 
 func detectSpecialKey(ev *tcell.EventKey) (isSpecial bool, keyName string) {
@@ -199,7 +231,10 @@ func (b *ugglyBrowser) processPageForms(page *pb.PageResponse, isMenu bool, labe
 	if page.Elements != nil {
 		for _, form := range page.Elements.Forms {
 			loggo.Debug("convering page form to ugform",
-				"tags", debugTags)
+				"tags", debugTags,
+				"formName", form.Name,
+				"formDivName", form.DivName,
+			)
 			f, err := ugcon.ConvertFormLocalForm(form, b.view)
 			if err != nil {
 				loggo.Error("error processing form", "err", err.Error(), "label", label)
@@ -212,8 +247,10 @@ func (b *ugglyBrowser) processPageForms(page *pb.PageResponse, isMenu bool, labe
 			// if people tell them to start at positionY = 0
 			loggo.Debug("shifting forms to be relative to DivBox",
 				"tags", debugTags)
+			foundDiv := false
 			for _, div := range page.DivBoxes.Boxes {
 				if form.DivName == div.Name {
+					foundDiv = true
 					loggo.Debug("shifting form to start in DivBox",
 						"formName", form.Name,
 						"divName", div.Name,
@@ -233,7 +270,9 @@ func (b *ugglyBrowser) processPageForms(page *pb.PageResponse, isMenu bool, labe
 				loggo.Debug("adding page form to b.forms",
 					"beforeAdd", len(b.forms),
 					"tags", debugTags)
-				b.forms = append(b.forms, f)
+				if foundDiv {
+					b.forms = append(b.forms, f)
+				}
 			}
 		}
 	}
@@ -317,6 +356,10 @@ func (b *ugglyBrowser) menuWatch() {
 // sendMessage can be used to add a message to the buffer and
 // can be called a goroutine for lazy message sending
 func (b *ugglyBrowser) sendMessage(msg, label string) {
+	loggo.Info("processing sendMessage",
+		"msg", msg,
+		"label", label,
+	)
 	b.messageBuffer <- msg
 }
 
@@ -379,11 +422,46 @@ func (b *ugglyBrowser) exit(code int) {
 	}
 	close(b.interrupt)
 	close(b.messageBuffer)
+	if b.headless {
+		b.headlessCaptureScreen()
+	}
 	b.view.Fini()
 	for _, message := range b.exitMessages {
 		fmt.Println(message)
 	}
 	os.Exit(code)
+}
+
+// startHeadlessTimer waits for the synthetic key queue to drain,
+// then injects a synthetic F10 to interrupt the blocking PollEvent()
+// and trigger headless capture and shutdown.
+func (b *ugglyBrowser) startHeadlessTimer() {
+	for {
+		time.Sleep(100 * time.Millisecond)
+		if b.synthStepIndex >= len(b.syntheticSteps) {
+			// Queue drained. Start countdown or exit immediately.
+			if b.autoExit {
+				time.Sleep(500 * time.Millisecond) // give draw loop one cycle
+				b.postF10()
+				return
+			}
+			if b.exitDelay > 0 {
+				time.Sleep(time.Duration(b.exitDelay) * time.Second)
+			} else {
+				// No timeout means we exit immediately after drain
+				time.Sleep(1 * time.Second)
+			}
+			b.postF10()
+			return
+		}
+	}
+}
+
+// postF10 injects a synthetic F10 event into the screen's event queue.
+// This unblocks any blocking PollEvent() call and triggers shutdown.
+func (b *ugglyBrowser) postF10() {
+	loggo.Info("headless timeout reached, injecting F10 to exit")
+	b.view.PostEvent(tcell.NewEventKey(tcell.KeyF10, 0, 0))
 }
 
 func (b *ugglyBrowser) refresh(ctx context.Context) {
@@ -782,7 +860,6 @@ func (b *ugglyBrowser) handleKeyStrokes(ctx context.Context, ev *tcell.EventKey)
 	}
 }
 
-
 func (b *ugglyBrowser) breaks(message string) {
 	if b.debugBreaks {
 		for {
@@ -803,50 +880,113 @@ func (b *ugglyBrowser) breaks(message string) {
 func (b *ugglyBrowser) pollEvents(ctx context.Context) {
 	for {
 		loggo.Debug("polling and watching for keyStrokes", "keyStrokes", len(b.activeKeyStrokes))
-		ev := b.view.PollEvent()
-		switch ev := ev.(type) {
-		case *tcell.EventKey:
-			switch ev.Key() {
-			case tcell.KeyF10:
-				b.cexCancel <- "user-cancel"
-				b.exit(0)
-				return
-			case tcell.KeyCtrlL:
-				loggo.Info("kill context")
-				b.cexCancel <- "user-cancel"
-			case tcell.KeyF4:
-				b.cexCancel <- "user-cancel"
-				b.getFeed(ctx)
-			case tcell.KeyF2:
-				b.cexCancel <- "user-cancel"
-				b.colorDemo()
-			case tcell.KeyF3:
-				b.cexCancel <- "user-cancel"
-				b.settingsPage("")
-			case tcell.KeyF5:
-				b.cexCancel <- "user-cancel"
-				b.refresh(ctx)
-			case tcell.KeyF6:
-				b.cexCancel <- "user-cancel"
-				b.bookmarksPage()
-			case tcell.KeyF7:
-				b.cexCancel <- "user-cancel"
-				b.bookmarkAdd()
-			default:
-				loggo.Debug("sending to handleKeyStrokes",
-					"numLinks", len(b.activeKeyStrokes))
-				b.cexCancel <- "user-cancel"
-				b.handleKeyStrokes(ctx, ev)
-				// not async, poll could be blocked in handleKeyStrokes
+		if b.synthStepIndex < len(b.syntheticSteps) {
+			step := b.syntheticSteps[b.synthStepIndex]
+			b.synthStepIndex++
+
+			// If step has an event, route it through existing logic
+			if step.ev != nil {
+				loggo.Debug("using synthetic event step",
+					"index", b.synthStepIndex,
+					"total", len(b.syntheticSteps))
+
+				var ev tcell.Event = step.ev
+				switch ev := ev.(type) {
+				case *tcell.EventKey:
+					switch ev.Key() {
+					case tcell.KeyF10:
+						b.cexCancel <- "user-cancel"
+						b.exit(0)
+						return
+					case tcell.KeyCtrlL:
+						loggo.Info("kill context")
+						b.cexCancel <- "user-cancel"
+					case tcell.KeyF4:
+						b.cexCancel <- "user-cancel"
+						b.getFeed(ctx)
+					case tcell.KeyF2:
+						b.cexCancel <- "user-cancel"
+						b.colorDemo()
+					case tcell.KeyF3:
+						b.cexCancel <- "user-cancel"
+						b.settingsPage("")
+					case tcell.KeyF5:
+						b.cexCancel <- "user-cancel"
+						b.refresh(ctx)
+					case tcell.KeyF6:
+						b.cexCancel <- "user-cancel"
+						b.bookmarksPage()
+					case tcell.KeyF7:
+						b.cexCancel <- "user-cancel"
+						b.bookmarkAdd()
+					default:
+						loggo.Debug("sending to handleKeyStrokes",
+							"numLinks", len(b.activeKeyStrokes))
+						b.cexCancel <- "user-cancel"
+						b.handleKeyStrokes(ctx, ev)
+					}
+				case *tcell.EventResize:
+					b.view.Sync()
+					if !b.resizing {
+						go b.resizeHandler(ctx)
+						b.resizeBuffer <- int(0)
+					}
+				case fakeEvent:
+					loggo.Debug("reloaded keyStrokes", "numKeyStrokes", len(b.activeKeyStrokes))
+				}
 			}
-		case *tcell.EventResize:
-			b.view.Sync()
-			if !b.resizing {
-				go b.resizeHandler(ctx)
-				b.resizeBuffer <- int(0)
+
+			// If step has a delay, sleep now
+			if step.wait > 0 {
+				loggo.Debug("synthetic delay", "duration", step.wait)
+				time.Sleep(step.wait)
 			}
-		case fakeEvent:
-			loggo.Debug("reloaded keyStrokes", "numKeyStrokes", len(b.activeKeyStrokes))
+		} else {
+			// No synthetics left — fall through to live PollEvent()
+			ev := b.view.PollEvent()
+			switch ev := ev.(type) {
+			case *tcell.EventKey:
+				switch ev.Key() {
+				case tcell.KeyF10:
+					b.cexCancel <- "user-cancel"
+					b.exit(0)
+					return
+				case tcell.KeyCtrlL:
+					loggo.Info("kill context")
+					b.cexCancel <- "user-cancel"
+				case tcell.KeyF4:
+					b.cexCancel <- "user-cancel"
+					b.getFeed(ctx)
+				case tcell.KeyF2:
+					b.cexCancel <- "user-cancel"
+					b.colorDemo()
+				case tcell.KeyF3:
+					b.cexCancel <- "user-cancel"
+					b.settingsPage("")
+				case tcell.KeyF5:
+					b.cexCancel <- "user-cancel"
+					b.refresh(ctx)
+				case tcell.KeyF6:
+					b.cexCancel <- "user-cancel"
+					b.bookmarksPage()
+				case tcell.KeyF7:
+					b.cexCancel <- "user-cancel"
+					b.bookmarkAdd()
+				default:
+					loggo.Debug("sending to handleKeyStrokes",
+						"numLinks", len(b.activeKeyStrokes))
+					b.cexCancel <- "user-cancel"
+					b.handleKeyStrokes(ctx, ev)
+				}
+			case *tcell.EventResize:
+				b.view.Sync()
+				if !b.resizing {
+					go b.resizeHandler(ctx)
+					b.resizeBuffer <- int(0)
+				}
+			case fakeEvent:
+				loggo.Debug("reloaded keyStrokes", "numKeyStrokes", len(b.activeKeyStrokes))
+			}
 		}
 	}
 }
@@ -892,7 +1032,6 @@ func (b *ugglyBrowser) linkFiller(partial *pb.Link) (*pb.Link, error) {
 	full.Stream = partial.Stream
 	return &full, err
 }
-
 
 // linkFromString takes a UGLI connection string (e.g., from
 // the address bar) and tries to parse it into a Link object.
@@ -1027,6 +1166,17 @@ func (b *ugglyBrowser) buildDraw(label string) (err error) {
 		loggo.Error("error compiling boxes", "err", err.Error())
 		return err
 	}
+	// check for empty content to give a user a more helpful explanation
+	totalBoxes := len(b.contentExt)
+	emptyBoxes := 0
+	for _, box := range b.contentExt {
+		if len(box.RawContents) == 0 {
+			emptyBoxes += 1
+		}
+	}
+	if totalBoxes == emptyBoxes {
+		go b.sendMessage("all content empty...", "notifyEmptyBoxes")
+	}
 	// make sure we process forms and keystrokes even if we got here
 	// during a menu build
 	if b.currentPage != nil {
@@ -1122,12 +1272,26 @@ type ugglyBrowser struct {
 	vW               int      // view width (updates on resize event)
 	exitMessages     []string // messages to print on exit since stdout no worky during
 	settings         *ugglyBrowserSettings
-	settingsFile	 string
+	settingsFile     string
 	vaultPassEnvVar  string
 	// define channels for context vendor
 	cexCancel, cexJobs chan string
 	cexOut             chan context.Context
-	debugBreaks       bool
+	debugBreaks        bool
+	syntheticSteps     []synthStep // interleaved events and delays from -key/-delay flags
+	synthStepIndex     int         // drain cursor for synthetic steps
+	// headless mode fields
+	headless        bool    // use SimulationScreen instead of real terminal
+	autoExit        bool    // exit immediately when synthetic queue drains
+	exitDelay       float64 // timeout seconds after synthetic queue drains (0 = unlimited)
+	headlessCapture string  // output file path for headless capture
+}
+
+// synthStep combines a synthetic keystroke event with an optional delay.
+// ev is nil for delay-steps, wait is zero for event-steps.
+type synthStep struct {
+	ev   tcell.Event
+	wait time.Duration
 }
 
 // newBrowser initializes all of the browser's properties
@@ -1151,13 +1315,14 @@ func newBrowser() *ugglyBrowser {
 	b.cexJobs = make(chan string)
 	b.cexCancel = make(chan string)
 	b.cexOut = make(chan context.Context)
+	b.syntheticSteps = make([]synthStep, 0)
 	return &b
 }
 
 // start initializes
-func (b *ugglyBrowser) start(ugri string) (err error) {
+func (b *ugglyBrowser) start(ugri string, headless bool) (err error) {
 	localAuthUuid = uggo.NewUuid() // set this so it's not blank
-	b.view, err = initScreen()
+	b.view, err = initScreen(headless)
 	if err != nil {
 		return err
 	}
@@ -1168,6 +1333,13 @@ func (b *ugglyBrowser) start(ugri string) (err error) {
 		err = nil
 	}
 	b.vW, b.vH = b.view.Size()
+	b.headless = headless
+	b.autoExit = *autoExit
+	b.exitDelay = *timeoutF
+	b.headlessCapture = *output
+	if headless {
+		go b.startHeadlessTimer()
+	}
 	go b.startupRefreshDelay()
 	loggo.Info("starting context vendor goroutine")
 	go b.cexVendor()
@@ -1224,7 +1396,30 @@ func (b *ugglyBrowser) startupRefreshDelay() {
 }
 
 func main() {
+	// Extract -key and -delay values and remove them from os.Args before
+	// flag.Parse() since flag.Parse() doesn't know about these flags.
+	// All values are collected into one interleaved queue.
+	var stepStrings []string
+	var keptArgs = []string{os.Args[0]}
+	for i := 1; i < len(os.Args); i++ {
+		a := os.Args[i]
+		if (a == "-key" || a == "-delay") && i+1 < len(os.Args) {
+			stepStrings = append(stepStrings, os.Args[i+1])
+			i++ // skip the value
+		} else {
+			keptArgs = append(keptArgs, a)
+		}
+	}
+	os.Args = keptArgs
 	flag.Parse()
+	// Build interleaved step queue from combined -key/-delay values
+	brow = newBrowser()
+	if len(stepStrings) > 0 {
+		brow.syntheticSteps = make([]synthStep, len(stepStrings))
+		for i, s := range stepStrings {
+			brow.syntheticSteps[i] = makeStep(s)
+		}
+	}
 	// for log package daemon should always be true
 	// i.e., don't log to stdout since tcell screen has
 	// control over screen and when stdout is accessed at
@@ -1247,7 +1442,6 @@ func main() {
 		fmt.Println(uggsec.NewVaultPassword())
 		os.Exit(0)
 	}
-	brow = newBrowser()
 	brow.debugBreaks = *breaks
 	var err error
 	brow.settingsFile = *configFile
@@ -1261,11 +1455,238 @@ func main() {
 	}
 	brow.sess = newSession()
 	// start the monostruct
-	err = brow.start(*ugri)
+	err = brow.start(*ugri, *headless)
 	defer brow.view.Fini()
 	// clean up screen so we don't butcher the user's terminal
 	if err != nil {
 		loggo.Error("error starting browser", "err", err.Error())
 		os.Exit(1)
 	}
+}
+
+// synthesizeEvent creates a tcell.Event from a raw key string.
+// Supported formats: single rune (e.g. "a"), named key (e.g. "Enter", "F5", "Tab"),
+// Ctrl combination (e.g. "Ctrl-A", "Ctrl-X"), Shift+key (e.g. "Shift-Enter").
+func synthesizeEvent(raw string) (tcell.Event, error) {
+	// Check for Ctrl- prefix
+	if strings.HasPrefix(raw, "Ctrl-") {
+		suffix := strings.TrimPrefix(raw, "Ctrl-")
+		ch := rune(0)
+		if len(suffix) > 0 {
+			ch = rune(suffix[0])
+		}
+		return tcell.NewEventKey(tcell.KeyRune, ch, tcell.ModCtrl), nil
+	}
+	// Check for Shift- prefix
+	if strings.HasPrefix(raw, "Shift-") {
+		suffix := strings.TrimPrefix(raw, "Shift-")
+		ch := rune(0)
+		if len(suffix) > 0 {
+			ch = rune(suffix[0])
+		}
+		return tcell.NewEventKey(tcell.KeyRune, ch, tcell.ModShift), nil
+	}
+	// Check for Ctrl+ key
+	if strings.HasPrefix(raw, "Ctrl+") {
+		suffix := strings.TrimPrefix(raw, "Ctrl+")
+		ch := rune(0)
+		if len(suffix) > 0 {
+			ch = rune(suffix[0])
+		}
+		return tcell.NewEventKey(tcell.KeyRune, ch, tcell.ModCtrl), nil
+	}
+	// Check for Shift+ key
+	if strings.HasPrefix(raw, "Shift+") {
+		suffix := strings.TrimPrefix(raw, "Shift+")
+		ch := rune(0)
+		if len(suffix) > 0 {
+			ch = rune(suffix[0])
+		}
+		return tcell.NewEventKey(tcell.KeyRune, ch, tcell.ModShift), nil
+	}
+	// Check for named keys via tcell.KeyNames
+	for key, name := range tcell.KeyNames {
+		if strings.EqualFold(name, raw) {
+			return tcell.NewEventKey(key, 0, 0), nil
+		}
+	}
+	// Try as a single rune
+	if len(raw) == 1 {
+		return tcell.NewEventKey(tcell.KeyRune, rune(raw[0]), 0), nil
+	}
+	// Try as UTF-8 runes
+	runes := []rune(raw)
+	if len(runes) == 1 {
+		return tcell.NewEventKey(tcell.KeyRune, runes[0], 0), nil
+	}
+	return nil, fmt.Errorf("cannot synthesize key: %s", raw)
+}
+
+// makeStep converts a raw CLI value into a synthStep. The value is tried as
+// a duration (e.g. "2s", "500ms"), then as a bare float (seconds), then as a
+// key name (via synthesizeEvent). On failure a warning is logged and a zero
+// step is returned (discarded by the caller).
+func makeStep(raw string) synthStep {
+	// 1. Try as a Go duration string
+	if d, err := time.ParseDuration(raw); err == nil {
+		return synthStep{wait: d}
+	}
+	// 2. Try as a bare number (float) → seconds
+	if n, err := strconv.ParseFloat(raw, 64); err == nil && n >= 0 {
+		return synthStep{wait: time.Duration(n * float64(time.Second))}
+	}
+	// 3. Must be a key → synthesize event
+	if ev, err := synthesizeEvent(raw); err == nil {
+		return synthStep{ev: ev}
+	}
+	// 4. Can't parse → warn and skip
+	loggo.Warn("unrecognized step value",
+		"value", raw,
+		"hint", "use a duration e.g. '2s'/'0.5s' or a key e.g. 'Enter'/'Tab'/'a'")
+	return synthStep{}
+}
+
+// ScreenOutput captures the current SimulationScreen and returns it as
+// ANSI 256-colored ASCII with Unicode box-drawing characters preserved.
+func (b *ugglyBrowser) ScreenOutput() (string, error) {
+	sim, ok := b.view.(tcell.SimulationScreen)
+	if !ok {
+		return "", fmt.Errorf("view is not a SimulationScreen")
+	}
+	cells, w, h := sim.GetContents()
+	if w == 0 || h == 0 {
+		return "", nil
+	}
+
+	var buf strings.Builder
+	var lastFg, lastBg uint8
+	var lastAttrs tcell.AttrMask
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			idx := y*w + x
+			var c tcell.SimCell
+			if idx < len(cells) {
+				c = cells[idx]
+			}
+			// Ensure rune is never empty
+			if len(c.Runes) == 0 {
+				c.Runes = []rune{' '}
+			}
+			r := c.Runes[0]
+
+			fg, bg, attrs := c.Style.Decompose()
+			fg8 := uint8(fg)
+			bg8 := uint8(bg)
+
+			// Emit ANSI escape when style changes
+			if fg8 != lastFg || bg8 != lastBg || attrs != lastAttrs {
+				// Reset previously active attributes
+				buf.WriteString("\033[0m")
+				fgIdx := rgbTo256(fg)
+				bgIdx := rgbTo256(bg)
+				buf.WriteString(fmt.Sprintf("\033[38;5;%dm", fgIdx))
+				buf.WriteString(fmt.Sprintf("\033[48;5;%dm", bgIdx))
+				if attrs&tcell.AttrBold != 0 {
+					buf.WriteString("\033[1m")
+				}
+				if attrs&tcell.AttrDim != 0 {
+					buf.WriteString("\033[2m")
+				}
+				if attrs&tcell.AttrItalic != 0 {
+					buf.WriteString("\033[3m")
+				}
+				if attrs&tcell.AttrUnderline != 0 {
+					buf.WriteString("\033[4m")
+				}
+				if attrs&tcell.AttrBlink != 0 {
+					buf.WriteString("\033[5m")
+				}
+				if attrs&tcell.AttrReverse != 0 {
+					buf.WriteString("\033[7m")
+				}
+				if attrs&tcell.AttrStrikeThrough != 0 {
+					buf.WriteString("\033[9m")
+				}
+				lastFg, lastBg, lastAttrs = fg8, bg8, attrs
+			}
+			buf.WriteRune(r)
+		}
+		if y < h-1 {
+			buf.WriteByte('\n')
+		}
+	}
+	buf.WriteString("\033[0m\n")
+	return buf.String(), nil
+}
+
+// rgbTo256 converts a tcell.Color to the nearest ANSI 256 palette index.
+func rgbTo256(c tcell.Color) int {
+	red, green, blue := c.RGB()
+	r, g, b := int(red), int(green), int(blue)
+
+	// Check standard 16 colors
+	for i, entry := range stdColorTable {
+		if entry[0] == r && entry[1] == g && entry[2] == b {
+			return i
+		}
+	}
+
+	// Check grayscale ramp (232-255)
+	for i := 0; i < 24; i++ {
+		v := 8 + 10*i
+		if abs(r-v) <= 5 && abs(g-v) <= 5 && abs(b-v) <= 5 {
+			return 232 + i
+		}
+	}
+
+	// 6x6x6 cube (16-231)
+	// Each component ∈ {0, 51, 102, 153, 204, 255}
+	cube := []int{0, 95, 135, 175, 215, 255}
+	cr := findNearest(cube, r)
+	cg := findNearest(cube, g)
+	cb := findNearest(cube, b)
+	return 16 + cr*36 + cg*6 + cb
+}
+
+func findNearest(vals []int, target int) int {
+	best := 0
+	bestDist := abs(target - vals[0])
+	for i := 1; i < len(vals); i++ {
+		d := abs(target - vals[i])
+		if d < bestDist {
+			bestDist = d
+			best = i
+		}
+	}
+	return best
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// stdColorTable defines the ANSI 256 color entries with RGB values.
+// Indices 0-15: standard + bright colors
+// Indices 16+: 6x6x6 cube and grayscale ramp computed by rgbTo256
+var stdColorTable = [][]int{
+	{0, 0, 0},       // 0: black
+	{128, 0, 0},     // 1: maroon (standard red)
+	{0, 128, 0},     // 2: green
+	{128, 128, 0},   // 3: olive (yellow)
+	{0, 0, 128},     // 4: blue
+	{128, 0, 128},   // 5: purple (magenta)
+	{0, 128, 128},   // 6: teal (cyan)
+	{192, 192, 192}, // 7: silver (white/light gray)
+	{128, 128, 128}, // 8: gray (dark gray)
+	{255, 0, 0},     // 9: bright red
+	{0, 255, 0},     // 10: bright green
+	{255, 255, 0},   // 11: bright yellow
+	{0, 0, 255},     // 12: bright blue
+	{255, 0, 255},   // 13: bright magenta
+	{0, 255, 255},   // 14: bright cyan
+	{255, 255, 255}, // 15: bright white
 }
