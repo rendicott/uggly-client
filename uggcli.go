@@ -55,10 +55,15 @@ var (
 var loggo log15.Logger
 
 // headlessCaptureScreen captures the current screen and writes output to --output file.
+// Syncs the screen buffer first to ensure render is complete, then captures.
 func (b *ugglyBrowser) headlessCaptureScreen() {
 	if !b.headless {
 		return
 	}
+	// Force a render cycle before capture
+	b.view.Show()
+	// Wait for the render to propagate to the simulation screen's front buffer
+	time.Sleep(200 * time.Millisecond)
 	text, err := b.ScreenOutput()
 	if err != nil {
 		loggo.Warn("failed to capture screen", "error", err.Error())
@@ -1555,8 +1560,17 @@ func (b *ugglyBrowser) ScreenOutput() (string, error) {
 	}
 	cells, w, h := sim.GetContents()
 	if w == 0 || h == 0 {
+		loggo.Debug("sim screen dimensions are zero, skipping capture", "w", w, "h", h)
 		return "", nil
 	}
+	// Debug: log how many non-space cells we found
+	nonSpace := 0
+	for _, c := range cells {
+		if len(c.Bytes) > 0 && c.Bytes[0] != ' ' && c.Bytes[0] != '\n' {
+			nonSpace++
+		}
+	}
+	loggo.Debug("sim screen capture", "w", w, "h", h, "cells", len(cells), "nonSpace", nonSpace)
 
 	var buf strings.Builder
 	var lastFg, lastBg uint8
@@ -1569,7 +1583,12 @@ func (b *ugglyBrowser) ScreenOutput() (string, error) {
 			if idx < len(cells) {
 				c = cells[idx]
 			}
-			// Ensure rune is never empty
+			// SimCell.Runes is only populated for "dirty" cells that get painted
+			// by simscreen.drawCell(). Fall back to Bytes for cells that were
+			// SetContent() but never re-rendered.
+			if len(c.Runes) == 0 && len(c.Bytes) > 0 {
+				c.Runes = []rune(string(c.Bytes))
+			}
 			if len(c.Runes) == 0 {
 				c.Runes = []rune{' '}
 			}
