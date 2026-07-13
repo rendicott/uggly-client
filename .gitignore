@@ -1,3 +1,13 @@
 output*
 *.log.json
 go.sum
+# local build + session artifacts
+ugglyc
+ugglyc.exe
+*.encrypted
+cookies.json
+uggly-screenshot-*.txt
+screen*.txt
+keystrokes*.json
+chat_keystrokes.json
+test_chat.txt
