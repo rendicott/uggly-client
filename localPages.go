@@ -7,41 +7,134 @@ import (
 	"github.com/rendicott/uggo"
 )
 
-func buildFeedBrowser(width int, keyStrokes []*pb.KeyStroke) *pb.PageResponse {
-	height := 36
+// feedPageSize is how many feed listings appear per feed-browser screen.
+const feedPageSize = 16
+
+// buildFeedBrowser renders one page of feed listings with n/p pagination.
+// pages is the full server feed; offset is the first listing index to show.
+func buildFeedBrowser(width, height int, pages []*pb.PageListing, offset int, server, port string) *pb.PageResponse {
+	if height < 12 {
+		height = 24
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	total := len(pages)
+	if offset > total {
+		offset = total
+	}
+	end := offset + feedPageSize
+	if end > total {
+		end = total
+	}
+	slice := pages[offset:end]
+	pageNum := 1
+	if feedPageSize > 0 {
+		pageNum = offset/feedPageSize + 1
+	}
+	pagesTotal := 1
+	if total > 0 {
+		pagesTotal = (total + feedPageSize - 1) / feedPageSize
+	}
+
 	localPage := pb.PageResponse{
 		Name:     "uggcli-feedbrowser",
 		DivBoxes: &pb.DivBoxes{},
 		Elements: &pb.Elements{},
 	}
-	menuBar := pb.DivBox{
+	localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes, &pb.DivBox{
 		Name:     "uggcli-feedbrowser-list",
-		Border:   false,
-		FillChar: uggo.ConvertStringCharRune("X"),
-		StartX:   0,
+		Border:   true,
+		BorderW:  1,
+		FillChar: uggo.ConvertStringCharRune(" "),
+		StartX:   1,
 		StartY:   0,
-		Width:    int32(width),
-		Height:   int32(height),
-		FillSt:   uggo.Style("grey", "black"),
+		Width:    int32(width - 2),
+		Height:   int32(height - 4),
+		BorderChar: uggo.ConvertStringCharRune("="),
+		BorderSt: uggo.Style("cyan", "black"),
+		FillSt:   uggo.Style("white", "black"),
+	})
+	content := fmt.Sprintf(
+		"SERVER FEED  listings %d–%d of %d  (page %d/%d)\n"+
+			"(n)ext page  (p)rev page  key opens listing\n\n",
+		offset+1, end, total, pageNum, pagesTotal,
+	)
+	if total == 0 {
+		content += "(no pages advertised by server)\n"
 	}
-	localPage.DivBoxes.Boxes = append(localPage.DivBoxes.Boxes, &menuBar)
-	contentString := ""
-	for _, k := range keyStrokes {
-		switch x := k.Action.(type) {
-		case *pb.KeyStroke_Link:
-			contentString += fmt.Sprintf(
-				"(%s) %s\n", k.KeyStroke, x.Link.PageName)
-			localPage.KeyStrokes = append(localPage.KeyStrokes, k)
+	for i, listing := range slice {
+		if i >= len(uggo.StrokeMap) {
+			break
 		}
+		stroke := uggo.StrokeMap[i]
+		desc := listing.Description
+		if desc == "" {
+			desc = listing.Name
+		}
+		content += fmt.Sprintf("(%s) %s\n    %s\n", stroke, listing.Name, desc)
+		localPage.KeyStrokes = append(localPage.KeyStrokes, &pb.KeyStroke{
+			KeyStroke: stroke,
+			Action: &pb.KeyStroke_Link{
+				Link: &pb.Link{
+					PageName: listing.Name,
+					Server:   server,
+					Port:     port,
+				},
+			},
+		})
 	}
-	feedBrowserContent := pb.TextBlob{
-		Content:  contentString,
+	// Pagination as local events (handled in client)
+	if end < total {
+		localPage.KeyStrokes = append(localPage.KeyStrokes, &pb.KeyStroke{
+			KeyStroke: "n",
+			Action: &pb.KeyStroke_Event{Event: &pb.Event{Name: "feed_next"}},
+		})
+	}
+	if offset > 0 {
+		localPage.KeyStrokes = append(localPage.KeyStrokes, &pb.KeyStroke{
+			KeyStroke: "p",
+			Action: &pb.KeyStroke_Event{Event: &pb.Event{Name: "feed_prev"}},
+		})
+	}
+	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &pb.TextBlob{
+		Content:  content,
 		Wrap:     true,
 		Style:    uggo.Style("white", "black"),
 		DivNames: []string{"uggcli-feedbrowser-list"},
-	}
-	localPage.Elements.TextBlobs = append(localPage.Elements.TextBlobs, &feedBrowserContent)
+	})
 	return &localPage
+}
+
+// buildLoadingPage is shown while a network fetch is in flight.
+func buildLoadingPage(width, height int, dest string) *pb.PageResponse {
+	msg := fmt.Sprintf(
+		"LOADING\n\nConnecting to:\n  %s\n\nPlease wait…\nEsc cancels.",
+		dest,
+	)
+	page := buildStatus(msg, width, height)
+	page.Name = "uggcli-loading"
+	return page
+}
+
+// buildPageErrorPage renders a structured PageError from the protocol.
+func buildPageErrorPage(width, height int, pageName string, pe *pb.PageError) *pb.PageResponse {
+	code := "ERROR"
+	if pe != nil {
+		code = pe.Code.String()
+	}
+	msg := ""
+	if pe != nil {
+		msg = pe.Message
+	}
+	body := fmt.Sprintf(
+		"PAGE ERROR\ncode: %s\npage: %s\n\n%s\n\nF1 address bar  |  F5 refresh  |  F4 feed",
+		code, pageName, msg,
+	)
+	page := buildStatus(body, width, height)
+	page.Name = "uggcli-page-error"
+	page.Error = pe
+	return page
 }
 
 func buildBookmarks(width, height int, s *ugglyBrowserSettings) *pb.PageResponse {

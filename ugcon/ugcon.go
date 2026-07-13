@@ -89,6 +89,42 @@ func ConvertFormLocalForm (uf *uggly.Form, s tcell.Screen) (*ugform.Form, error)
 	u.Name = uf.Name
 	u.SubmitAction = uf.SubmitLink
 	for _, tb := range uf.TextBoxes {
+		fgCursor, bgCursor := "black", "white"
+		fgFill, bgFill := "white", "blue"
+		fgText, bgText := "white", "blue"
+		fgDesc, bgDesc := "white", "black"
+		if tb.StyleCursor != nil {
+			if tb.StyleCursor.Fg != "" {
+				fgCursor = tb.StyleCursor.Fg
+			}
+			if tb.StyleCursor.Bg != "" {
+				bgCursor = tb.StyleCursor.Bg
+			}
+		}
+		if tb.StyleFill != nil {
+			if tb.StyleFill.Fg != "" {
+				fgFill = tb.StyleFill.Fg
+			}
+			if tb.StyleFill.Bg != "" {
+				bgFill = tb.StyleFill.Bg
+			}
+		}
+		if tb.StyleText != nil {
+			if tb.StyleText.Fg != "" {
+				fgText = tb.StyleText.Fg
+			}
+			if tb.StyleText.Bg != "" {
+				bgText = tb.StyleText.Bg
+			}
+		}
+		if tb.StyleDescription != nil {
+			if tb.StyleDescription.Fg != "" {
+				fgDesc = tb.StyleDescription.Fg
+			}
+			if tb.StyleDescription.Bg != "" {
+				bgDesc = tb.StyleDescription.Bg
+			}
+		}
 		u.AddTextBox(&ugform.AddTextBoxInput{
 			Name: tb.Name,
 			TabOrder: int(tb.TabOrder),
@@ -98,10 +134,10 @@ func ConvertFormLocalForm (uf *uggly.Form, s tcell.Screen) (*ugform.Form, error)
 			PositionY: int(tb.PositionY),
 			Height: int(tb.Height),
 			Width: int(tb.Width),
-			StyleCursor: *setStyle(tb.StyleCursor.Fg, tb.StyleCursor.Bg),
-			StyleFill: *setStyle(tb.StyleFill.Fg, tb.StyleFill.Bg),
-			StyleText: *setStyle(tb.StyleText.Fg, tb.StyleText.Bg),
-			StyleDescription: *setStyle(tb.StyleDescription.Fg, tb.StyleDescription.Bg),
+			StyleCursor: *setStyle(fgCursor, bgCursor),
+			StyleFill: *setStyle(fgFill, bgFill),
+			StyleText: *setStyle(fgText, bgText),
+			StyleDescription: *setStyle(fgDesc, bgDesc),
 			ShowDescription: tb.ShowDescription,
 			Password: tb.Password,
 		})

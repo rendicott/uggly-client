@@ -39,12 +39,41 @@ NOTE: [Project Gemini](https://gemini.circumlunar.space/) seems to have similar 
 * Text wrapping of textblobs in divboxes. 
 * dialing new server targets based on activated links or address-bar input
 * A color demo that helps understand color names and what they look like for a given terminal. Mostly useful for server authors to select styling decisions. 
-* Server authors can host a "feed" which is like a server index that can be accessed via Menu shortcut. Sometimes this is helpful for users to get their bearings on available server content. Lazy server authors could use this too if they don't want to draw fancy nav menus. 
+* Server authors can host a "feed" which is like a server index that can be accessed via Menu shortcut. Sometimes this is helpful for users to get their bearings on available server content. Lazy server authors could use this too if they don't want to draw fancy nav menus. Feed listings support **n/p pagination**.
 * ability to immediately connect to a server, port, page via command parameters
 * Cookie support loosely based on HTTP browser cookies. For example, a sessionID cookie provided by a server with an Expiration attribute set will store to disk on close. All cookies without Expiration set are considered session cookies and are purged on close. 
 * Secure cookie storage for non-session cookies on disk on client close. This is stored in an encrypted file with the encryption key either stored in OS keyring or an ENV var that the user specifies. 
 * Settings editor in browser.
-* Supports Page Streams, a server can send a stream of PageResponse's giving the illusion of animation or a stream of information. Unfortunately forms on streams are not stable right now. 
+* Supports **Page Streams** (`GetPageStream`) for animation and **live surfaces** (games, panable docs, progressive UI). Prefer server-paced streams with `streamDelayMs = 0`. Forms on streams are still not recommended.
+
+## Recent client work (protocol v2 + streaming)
+
+See also the protocol docs: [uggly/doc/CHANGES.md](https://github.com/rendicott/uggly/blob/master/doc/CHANGES.md) and [STREAMING.md](https://github.com/rendicott/uggly/blob/master/STREAMING.md).
+
+| Area | Behavior |
+|------|----------|
+| **Widgets** | Client expands `Table`, `ItemList`, `Prompt`, and layout `Node` trees before draw (`expand.go`) |
+| **Events** | `KeyStroke.event` → `PageRequest.event` (no page-name dialects required) |
+| **Stream input** | Event keys inject unary `GetPage` with `query[_input]=1` **without cancelling** the stream |
+| **Stream pacing** | `streamDelayMs == 0` → **no client sleep** (server-paced only) |
+| **Stream paint** | Frames coalesced; UI paints the **latest** only |
+| **Stream lifetime** | Streams use a cancel-only context (not the short page RPC deadline) |
+| **Paint** | Dirty-region updates via `paint_buffer.go` (less full-screen traffic) |
+| **DivScroll** | Client-side scroll of named boxes |
+| **Meta** | Best-effort `Meta.Hello` after dial for capability discovery |
+| **F8** | Save a text screenshot of the current screen |
+| **F9** | Pause / resume stream display (stream still receives; frozen frame for capture) |
+| **Headless** | `--headless`, `-key` / `-delay` synthetic input, `--output` screen capture |
+| **Cookies** | Host stamped when server field blank; empty `SetCookies` skips jar work |
+
+```bash
+# Interactive
+./ugglyc -UGRI ugtp://127.0.0.1:PORT/home
+
+# Headless smoke
+./ugglyc --headless --auto-exit --timeout 5 --page-timeout 180 \
+  --output /tmp/screen.txt -UGRI ugtp://127.0.0.1:PORT/home
+```
 
 ## Client Notes (developer'ish)
 * Common logging across all sub-packages via [log15](https://github.com/inconshreveable/log15)

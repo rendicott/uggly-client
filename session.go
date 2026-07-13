@@ -9,6 +9,7 @@ import (
 	"github.com/rendicott/uggo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"io"
 	"strings"
 	"time"
@@ -36,37 +37,79 @@ func (s *session) genUgri() *string {
 	return &ugri
 }
 
+// dialTimeout caps how long we wait for TCP/TLS handshake separately from page RPC.
+const dialTimeout = 10 * time.Second
+
 func (s *session) getConnection(ctx context.Context) (err error) {
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithBlock())
 	tempConnString := fmt.Sprintf("%s:%s", s.server, s.port)
 	loggo.Info("dialing server", "connString", tempConnString)
+
+	// Prefer a short dial budget; if parent already has a tighter deadline, honor it.
+	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
+	defer cancel()
+
 	if s.secure {
-		//certs, err := x509.SystemCertPool()
-		//if err != nil {
-		//	loggo.Error("error loading system cert pool")
-		//	return err
-		//}
 		config := &tls.Config{
-			//RootCAs: certs,
+			MinVersion: tls.VersionTLS12,
 		}
 		loggo.Info("attempting secure connection", "host", tempConnString)
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(config)))
-		s.conn, err = grpc.DialContext(ctx, tempConnString, opts...)
+		s.conn, err = grpc.DialContext(dialCtx, tempConnString, opts...)
 		s.secured = true
 	} else {
 		loggo.Info("attempting insecure connection")
-		opts = append(opts, grpc.WithInsecure())
-		s.conn, err = grpc.DialContext(ctx, tempConnString, opts...)
+		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		s.conn, err = grpc.DialContext(dialCtx, tempConnString, opts...)
 		s.secured = false
 	}
 	if err != nil {
 		loggo.Error("fail to dial", "error", err.Error())
 		s.secure = false
-		return err
+		return fmt.Errorf("dial %s: %w", tempConnString, err)
 	}
 	loggo.Info("connection successful", "connString", tempConnString)
+	// Best-effort capability handshake (Meta service is optional)
+	s.tryMetaHello(dialCtx)
 	return err
+}
+
+// tryMetaHello calls Meta.Hello when the server implements it. Failure is non-fatal.
+func (s *session) tryMetaHello(ctx context.Context) {
+	if s.conn == nil {
+		return
+	}
+	client := pb.NewMetaClient(s.conn)
+	helloCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	resp, err := client.Hello(helloCtx, &pb.ClientHello{
+		ClientVersion: version,
+		Features: []string{
+			"stream", "stream_input", "page_timeout", "divscroll",
+			"screenshot", "stream_pause", "query", "event",
+		},
+		Width:  s.clientWidth,
+		Height: s.clientHeight,
+		ReservedKeys: map[string]string{
+			"F1": "address-bar", "F2": "color-demo", "F3": "settings",
+			"F4": "feed", "F5": "refresh", "F6": "bookmarks", "F7": "add-bookmark",
+			"F8": "screenshot", "F9": "stream-pause", "F10": "exit",
+		},
+	})
+	if err != nil {
+		loggo.Debug("Meta.Hello unavailable", "error", err.Error())
+		return
+	}
+	loggo.Info("Meta.Hello ok",
+		"app", resp.GetAppName(),
+		"serverVersion", resp.GetServerVersion(),
+		"features", resp.GetFeatures(),
+		"defaultPage", resp.GetDefaultPage(),
+	)
+	if resp.GetDefaultPage() != "" && s.currPage == "" {
+		s.currPage = resp.GetDefaultPage()
+	}
 }
 
 func (s *session) prepGet(ctx context.Context, pq *pb.PageRequest) (err error) {
@@ -139,10 +182,12 @@ func (s *session) get2(ctx context.Context, pq *pb.PageRequest) (pr *pb.PageResp
 	pr, err = clientPage.GetPage(ctx, pq)
 	if err != nil {
 		loggo.Error("error getting page from server", "error", err.Error())
-		// reset err text so we can catch it
-		err = errors.New("error getting page from server")
+		// Wrap so callers can still errors.Is / gRPC status.FromError the cause,
+		// while keeping a stable outer message for legacy string matches.
+		err = fmt.Errorf("error getting page from server: %w", err)
+	} else {
+		s.currPage = pq.Name
 	}
-	s.currPage = pq.Name
 	return pr, err
 }
 
@@ -153,42 +198,56 @@ func newSession() *session {
 
 // setServer just sets things up for dialing the gRPC connection
 // and some place to store our current connection so we can prevent
-// having to redial.
+// having to redial. If host/port/secure change, drop the old conn so
+// prepGet cannot reuse a stale dial (e.g. address-bar jump 5566→50051).
 func (s *session) setServer(server, port string, secure bool) {
-	// borrow link methods to prevent repetition of construct logic
+	if s.server != server || s.port != port || s.secure != secure {
+		if s.conn != nil {
+			_ = s.conn.Close()
+			s.conn = nil
+		}
+		s.stream = false
+		s.secured = false
+	}
 	s.server = server
 	s.port = port
 	s.secure = secure
 }
 
-func (s *session) feedKeyStrokes() (keyStrokes []*pb.KeyStroke, err error) {
+func (s *session) getFeed() (feed *pb.FeedResponse, err error) {
 	feedErrMsg := "no server connection"
 	feedErrMsgNoFeed := "server provides no feed"
 	if s.conn == nil {
-		err = errors.New(feedErrMsg)
-		loggo.Error(feedErrMsg)
-		return keyStrokes, err
+		return nil, errors.New(feedErrMsg)
 	}
 	clientFeed := pb.NewFeedClient(s.conn)
 	loggo.Info("New feed client created, requesting feed from server")
-	fr := pb.FeedRequest{
-		SendData: true,
-	}
-	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	feed, err := clientFeed.GetFeed(ctx, &fr)
+	fr := pb.FeedRequest{SendData: true}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	feed, err = clientFeed.GetFeed(ctx, &fr)
 	if err != nil {
 		loggo.Error("error getting feed from server", "error", err.Error())
 		if strings.Contains(err.Error(), "connection refused") {
-			// reset err text so we can catch it
 			err = errors.New(feedErrMsg)
-		}
-		if strings.Contains(err.Error(), "unknown service") {
-			// reset err text so we can catch it
+		} else if strings.Contains(err.Error(), "unknown service") {
 			err = errors.New(feedErrMsgNoFeed)
 		}
+		return nil, err
+	}
+	return feed, nil
+}
+
+// feedKeyStrokes builds keystrokes for one page of feed listings (legacy helper).
+func (s *session) feedKeyStrokes() (keyStrokes []*pb.KeyStroke, err error) {
+	feed, err := s.getFeed()
+	if err != nil {
 		return keyStrokes, err
 	}
 	for i, page := range feed.Pages {
+		if i >= len(uggo.StrokeMap) {
+			break
+		}
 		keyStrokes = append(keyStrokes, &pb.KeyStroke{
 			KeyStroke: uggo.StrokeMap[i],
 			Action: &pb.KeyStroke_Link{
@@ -200,6 +259,5 @@ func (s *session) feedKeyStrokes() (keyStrokes []*pb.KeyStroke, err error) {
 			},
 		})
 	}
-	loggo.Debug("feedKeyStrokes returning keyStrokes", "len(keyStrokes)", len(keyStrokes))
 	return keyStrokes, err
 }

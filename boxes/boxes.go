@@ -3,10 +3,28 @@ package boxes
 import (
 	"bytes"
 	"strings"
+	"sync"
+
 	"github.com/gdamore/tcell/v2"
-	"github.com/mitchellh/go-wordwrap"
 	"github.com/inconshreveable/log15"
+	"github.com/mitchellh/go-wordwrap"
 )
+
+// pixelColPool reuses []*Pixel columns during DivBox.Init to cut alloc pressure
+// on high-frequency stream frames.
+var pixelColPool = sync.Pool{
+	New: func() interface{} {
+		return make([]*Pixel, 0, 64)
+	},
+}
+
+func getPixelCol(height int) []*Pixel {
+	col := pixelColPool.Get().([]*Pixel)
+	if cap(col) < height {
+		return make([]*Pixel, height)
+	}
+	return col[:height]
+}
 
 // Loggo is the global logger
 var Loggo log15.Logger
@@ -106,9 +124,77 @@ func (bi *DivBox) addTextBlob(tb *TextBlob) {
 		}
 	}
 	if invisible > 0 {
-		// will use this later to implement scrolling
 		if len(bi.HiddenContents) > 0 {
-			Loggo.Info("stored hidden content", "divBox.Name", bi.Name, "lines", len(bi.HiddenContents[0]))
+			Loggo.Debug("stored hidden content", "divBox.Name", bi.Name, "lines", len(bi.HiddenContents[0]))
+		}
+	}
+}
+
+// ScrollDivBox shifts visible fill content up by `offset` lines, pulling from
+// HiddenContents. Offset 0 is a no-op. Negative offsets are ignored.
+// HiddenContents layout is [column][hiddenRow] as produced by addTextBlob.
+func ScrollDivBox(bi *DivBox, offset int) {
+	if bi == nil || offset <= 0 || bi.RawContents == nil || len(bi.HiddenContents) == 0 {
+		return
+	}
+	fillY1 := bi.BorderW
+	fillY2 := bi.Height - bi.BorderW
+	if fillY2 <= fillY1 {
+		return
+	}
+	fillH := fillY2 - fillY1
+	hiddenLines := 0
+	for x := 0; x < len(bi.HiddenContents); x++ {
+		if n := len(bi.HiddenContents[x]); n > hiddenLines {
+			hiddenLines = n
+		}
+	}
+	if hiddenLines == 0 {
+		return
+	}
+	if offset > hiddenLines {
+		offset = hiddenLines
+	}
+	st := tcell.StyleDefault
+	if bi.FillSt != nil {
+		st = *bi.FillSt
+	}
+	for x := 0; x < bi.Width; x++ {
+		if x >= len(bi.RawContents) {
+			break
+		}
+		col := bi.RawContents[x]
+		var hid []*Pixel
+		if x < len(bi.HiddenContents) {
+			hid = bi.HiddenContents[x]
+		}
+		vis := make([]*Pixel, fillH)
+		for r := 0; r < fillH; r++ {
+			y := fillY1 + r
+			if y < len(col) {
+				vis[r] = col[y]
+			}
+		}
+		newVis := make([]*Pixel, fillH)
+		for r := 0; r < fillH; r++ {
+			src := r + offset
+			if src < fillH {
+				newVis[r] = vis[src]
+				continue
+			}
+			hi := src - fillH // 0 .. offset-1
+			if hid != nil && hi < len(hid) && hid[hi] != nil {
+				cp := *hid[hi]
+				newVis[r] = &cp
+			} else {
+				newVis[r] = &Pixel{C: bi.FillChar, St: st, IsBorder: false}
+			}
+		}
+		for r := 0; r < fillH; r++ {
+			y := fillY1 + r
+			if y < len(col) && newVis[r] != nil {
+				col[y] = newVis[r]
+			}
 		}
 	}
 }
@@ -129,10 +215,10 @@ func (bi *DivBox) Init() {
 	bi.fillX2 = bi.Width - bi.BorderW
 	bi.fillY1 = bi.BorderW
 	bi.fillY2 = bi.Height - bi.BorderW
-	// initialize Pixelmap
+	// initialize Pixelmap (column slices may come from pool when height fits)
 	bi.RawContents = make([][]*Pixel, bi.Width)
 	for i := range bi.RawContents {
-		bi.RawContents[i] = make([]*Pixel, bi.Height)
+		bi.RawContents[i] = getPixelCol(bi.Height)
 	}
 	// fill with Borderchar or blanks
 	for i := 0; i < bi.Width; i++ {
@@ -275,11 +361,22 @@ func wrap(s string, fillWidth int, hardBreaks bool) map[int][]rune {
 	return charMap
 }
 
+// noWrap does not soft-wrap on width, but still honors explicit newlines
+// so multi-line server content (menus, lists, help text) paints on separate rows.
 func noWrap(s string) map[int][]rune {
 	charMap := make(map[int][]rune, 0)
-	charMap[0] = make([]rune, len(s))
-	for j, char := range s {
-		charMap[0][j] = char
+	// Normalize CRLF → LF then split on hard line breaks.
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		runes := []rune(line)
+		charMap[i] = make([]rune, len(runes))
+		copy(charMap[i], runes)
+	}
+	// Empty content still needs one row so callers can iterate safely.
+	if len(charMap) == 0 {
+		charMap[0] = []rune{}
 	}
 	return charMap
 }
